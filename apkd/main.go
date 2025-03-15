@@ -9,6 +9,7 @@ import (
 	"strings"
 	"sync"
 
+	_ "kiber-io/apkd/apkd/devices"
 	"kiber-io/apkd/apkd/sources"
 
 	"github.com/spf13/cobra"

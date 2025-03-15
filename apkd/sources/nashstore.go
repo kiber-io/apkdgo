@@ -2,45 +2,20 @@ package sources
 
 import (
 	"bytes"
-	crand "crypto/rand"
-	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"io"
-	"math/big"
-	mrand "math/rand"
+	"kiber-io/apkd/apkd/devices"
 	"net/http"
 
 	"golang.org/x/text/cases"
 	"golang.org/x/text/language"
 )
 
-type NashStore struct {
-	devices []map[string]any
-}
+type NashStore struct{}
 
 func (s NashStore) Name() string {
 	return "nashstore"
-}
-
-func (s NashStore) getDevice() map[string]any {
-	n, err := crand.Int(crand.Reader, big.NewInt(int64(len(s.devices))))
-	if err != nil {
-		// Fallback to math/rand
-		return s.devices[mrand.Intn(len(s.devices))]
-	}
-	return s.devices[n.Int64()]
-}
-
-func (s NashStore) generateAndroidID() string {
-	bytes := make([]byte, 8)
-	if _, err := crand.Read(bytes); err != nil {
-		// Fallback to math/rand if crypto/rand fails
-		for i := range bytes {
-			bytes[i] = byte(mrand.Intn(256))
-		}
-	}
-	return hex.EncodeToString(bytes)
 }
 
 func (s NashStore) answer42() string {
@@ -86,18 +61,34 @@ func (s NashStore) getAppInfo(packageName string) (map[string]any, error) {
 	if err != nil {
 		return nil, err
 	}
-	device := s.getDevice()
+	device := devices.GetRandomDevice()
 	caser := cases.Title(language.English)
-	deviceBrand := caser.String(device["brand"].(string))
-	req.Header.Add("User-Agent", "Nashstore [com.nashstore][0.0.6]["+deviceBrand)
+	deviceBrand := caser.String(device.BuildBrand)
+	req.Header.Add("User-Agent", "Nashstore [com.nashstore][0.0.6]["+deviceBrand+"]")
 	req.Header.Add("Accept", "application/json, text/plain, */*")
 	req.Header.Add("Accept-Encoding", "gzip")
 	req.Header.Add("Content-Type", "application/json")
 	req.Header.Add("xaccesstoken", s.answer42())
-	appHeaderBytes, err := json.Marshal(device)
+	appHeader := map[string]any{
+		"androidId":   device.GenerateAndroidID(),
+		"apiLevel":    device.BuildVersionSdkInt,
+		"baseOs":      "",
+		"buildId":     device.BuildId,
+		"carrier":     "T-Mobile",
+		"deviceName":  device.BuildModel,
+		"fingerprint": device.BuildFingerprint,
+		"fontScale":   1,
+		"brand":       device.BuildBrand,
+		"deviceId":    device.BuildDevice,
+		"width":       device.ScreenWidth,
+		"height":      device.ScreenHeight,
+		"scale":       2.625,
+	}
+	appHeaderBytes, err := json.Marshal(appHeader)
 	if err != nil {
 		return nil, err
 	}
+
 	req.Header.Add("nashstore-app", string(appHeaderBytes))
 
 	res, err := http.DefaultClient.Do(req)
@@ -153,96 +144,7 @@ func (s NashStore) Download(version Version) (io.ReadCloser, error) {
 	return downloadFile(version.Link)
 }
 
-func (s NashStore) generateRandomScreenWidth() float64 {
-	return 360 + mrand.Float64()*(480-360)
-}
-
-func (s NashStore) generateRandomScreenHeigth() float64 {
-	return 640 + mrand.Float64()*(1280-640)
-}
-
-func (s NashStore) generateRandomScale() float64 {
-	return 2.0 + mrand.Float64()*(4.0-2.0)
-}
-
 func init() {
 	s := NashStore{}
-	s.devices = []map[string]any{
-		{
-			"androidId":   s.generateAndroidID(),
-			"apiLevel":    35,
-			"baseOs":      "",
-			"buildId":     "AP4A.250205.002",
-			"carrier":     "MTS",
-			"deviceName":  "Pixel 7",
-			"fingerprint": "google/panther/panther:15/AP4A.250205.002/12821496:user/release-keys",
-			"fontScale":   1,
-			"brand":       "google",
-			"deviceId":    "panther",
-			"width":       s.generateRandomScreenWidth(),
-			"height":      s.generateRandomScreenHeigth(),
-			"scale":       s.generateRandomScale(),
-		},
-		{
-			"androidId":   s.generateAndroidID(),
-			"apiLevel":    35,
-			"baseOs":      "",
-			"buildId":     "BP1A.250305.020",
-			"carrier":     "Viva",
-			"deviceName":  "Pixel 9 Pro",
-			"fingerprint": "google/caiman/caiman:15/BP1A.250305.020/13009785:user/release-keys",
-			"fontScale":   1,
-			"brand":       "google",
-			"deviceId":    "caiman",
-			"width":       s.generateRandomScreenWidth(),
-			"height":      s.generateRandomScreenHeigth(),
-			"scale":       s.generateRandomScale(),
-		},
-		{
-			"androidId":   s.generateAndroidID(),
-			"apiLevel":    35,
-			"baseOs":      "",
-			"buildId":     "BP1A.250305.019",
-			"carrier":     "MegaFon",
-			"deviceName":  "Pixel 7 Pro",
-			"fingerprint": "google/cheetah/cheetah:15/BP1A.250305.019/13003188:user/release-keys",
-			"fontScale":   1,
-			"brand":       "google",
-			"deviceId":    "cheetah",
-			"width":       s.generateRandomScreenWidth(),
-			"height":      s.generateRandomScreenHeigth(),
-			"scale":       s.generateRandomScale(),
-		},
-		{
-			"androidId":   s.generateAndroidID(),
-			"apiLevel":    35,
-			"baseOs":      "",
-			"buildId":     "BP1A.250305.020",
-			"carrier":     "MTS",
-			"deviceName":  "Pixel 9 Pro Fold",
-			"fingerprint": "google/comet/comet:15/BP1A.250305.020/13009785:user/release-keys",
-			"fontScale":   1,
-			"brand":       "google",
-			"deviceId":    "comet",
-			"width":       s.generateRandomScreenWidth(),
-			"height":      s.generateRandomScreenHeigth(),
-			"scale":       s.generateRandomScale(),
-		},
-		{
-			"androidId":   s.generateAndroidID(),
-			"apiLevel":    35,
-			"baseOs":      "",
-			"buildId":     "BP1A.250305.019",
-			"carrier":     "MegaFon",
-			"deviceName":  "Pixel Fold",
-			"fingerprint": "google/felix/felix:15/BP1A.250305.019/13003188:user/release-keys",
-			"fontScale":   1,
-			"brand":       "google",
-			"deviceId":    "felix",
-			"width":       s.generateRandomScreenWidth(),
-			"height":      s.generateRandomScreenHeigth(),
-			"scale":       s.generateRandomScale(),
-		},
-	}
 	Register(s)
 }

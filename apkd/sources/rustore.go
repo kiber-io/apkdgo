@@ -6,7 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"io"
-	"math/big"
+	"kiber-io/apkd/apkd/devices"
 	mrand "math/rand"
 	"net/http"
 	"strconv"
@@ -14,7 +14,6 @@ import (
 
 type RuStore struct {
 	appsCache map[string]map[string]any
-	devices   []map[string]any
 }
 
 func (s RuStore) Name() string {
@@ -66,15 +65,6 @@ func (s RuStore) generateDeviceId() string {
 	return string(b1) + "--" + string(b2)
 }
 
-func (s RuStore) getDevice() map[string]any {
-	n, err := crand.Int(crand.Reader, big.NewInt(int64(len(s.devices))))
-	if err != nil {
-		// Fallback to math/rand
-		return s.devices[mrand.Intn(len(s.devices))]
-	}
-	return s.devices[n.Int64()]
-}
-
 func (s RuStore) getAppInfo(packageName string) (map[string]any, error) {
 	if appInfo, ok := s.appsCache[packageName]; ok {
 		return appInfo, nil
@@ -86,20 +76,19 @@ func (s RuStore) getAppInfo(packageName string) (map[string]any, error) {
 	if err != nil {
 		return nil, err
 	}
-	device := s.getDevice()
-	req.Header.Add("User-Agent", "RuStore/1.61.0.2 (Android "+device["firmwareVer"].(string)+"; SDK "+device["androidSdkVer"].(string)+"; arm64-v8a; "+device["deviceModel"].(string)+"; "+device["firmwareLang"].(string)+")")
+	device := devices.GetRandomDevice()
+	req.Header.Add("User-Agent", "RuStore/1.61.0.2 (Android "+device.BuildVersionRelease+"; SDK "+strconv.Itoa(device.BuildVersionSdkInt)+"; "+device.Platforms[0]+"; "+device.BuildModel+"; en)")
 	req.Header.Add("Connection", "Keep-Alive")
 	req.Header.Add("Accept-Encoding", "gzip")
-	req.Header.Add("deviceId", device["deviceId"].(string))
-	req.Header.Add("deviceManufacturerName", device["deviceManufacturerName"].(string))
-	req.Header.Add("deviceModelName", device["deviceModelName"].(string))
-	req.Header.Add("deviceModel", device["deviceModel"].(string))
-	req.Header.Add("firmwareLang", device["firmwareLang"].(string))
-	req.Header.Add("androidSdkVer", device["androidSdkVer"].(string))
-	req.Header.Add("firmwareVer", device["firmwareVer"].(string))
-	req.Header.Add("deviceType", device["deviceType"].(string))
-	req.Header.Add("ruStoreVerCode", "1061002")
+	req.Header.Add("deviceId", s.generateDeviceId())
+	req.Header.Add("deviceManufacturerName", device.BuildBrand)
+	req.Header.Add("deviceModelName", device.BuildModel)
+	req.Header.Add("deviceModel", device.BuildBrand+" "+device.BuildModel)
+	req.Header.Add("firmwareLang", "en")
+	req.Header.Add("androidSdkVer", strconv.Itoa(device.BuildVersionSdkInt))
+	req.Header.Add("firmwareVer", device.BuildVersionRelease)
 	req.Header.Add("deviceType", "mobile")
+	req.Header.Add("ruStoreVerCode", "1061002")
 	res, err := http.DefaultClient.Do(req)
 
 	if err != nil {
@@ -127,11 +116,7 @@ func (s RuStore) getAppInfo(packageName string) (map[string]any, error) {
 
 func (s RuStore) getDownloadLink(appId float64) (string, error) {
 	url := "https://backapi.rustore.ru/applicationData/v2/download-link"
-	device := s.getDevice()
-	sdkVersion, err := strconv.Atoi(device["androidSdkVer"].(string))
-	if err != nil {
-		return "", err
-	}
+	device := devices.GetRandomDevice()
 	payloadData := map[string]any{
 		"appId":          appId,
 		"firstInstall":   false,
@@ -141,7 +126,7 @@ func (s RuStore) getDownloadLink(appId float64) (string, error) {
 		},
 		"screenDensity":        480,
 		"supportedLocales":     []string{"en_US", "ru_RU"},
-		"sdkVersion":           sdkVersion,
+		"sdkVersion":           device.BuildVersionSdkInt,
 		"withoutSplits":        true,
 		"signatureFingerprint": nil,
 	}
@@ -155,17 +140,17 @@ func (s RuStore) getDownloadLink(appId float64) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	req.Header.Add("User-Agent", "RuStore/1.61.0.2 (Android "+device["firmwareVer"].(string)+"; SDK "+device["androidSdkVer"].(string)+"; arm64-v8a; "+device["deviceModel"].(string)+"; "+device["firmwareLang"].(string)+")")
+	req.Header.Add("User-Agent", "RuStore/1.61.0.2 (Android "+device.BuildVersionRelease+"; SDK "+strconv.Itoa(device.BuildVersionSdkInt)+"; "+device.Platforms[0]+"; "+device.BuildModel+"; en)")
 	req.Header.Add("Connection", "Keep-Alive")
 	req.Header.Add("Accept-Encoding", "gzip")
-	req.Header.Add("deviceId", device["deviceId"].(string))
-	req.Header.Add("deviceManufacturerName", device["deviceManufacturerName"].(string))
-	req.Header.Add("deviceModelName", device["deviceModelName"].(string))
-	req.Header.Add("deviceModel", device["deviceModel"].(string))
-	req.Header.Add("firmwareLang", device["firmwareLang"].(string))
-	req.Header.Add("androidSdkVer", device["androidSdkVer"].(string))
-	req.Header.Add("firmwareVer", device["firmwareVer"].(string))
-	req.Header.Add("deviceType", device["deviceType"].(string))
+	req.Header.Add("deviceId", s.generateDeviceId())
+	req.Header.Add("deviceManufacturerName", device.BuildBrand)
+	req.Header.Add("deviceModelName", device.BuildModel)
+	req.Header.Add("deviceModel", device.BuildBrand+" "+device.BuildModel)
+	req.Header.Add("firmwareLang", "en")
+	req.Header.Add("androidSdkVer", strconv.Itoa(device.BuildVersionSdkInt))
+	req.Header.Add("firmwareVer", device.BuildVersionRelease)
+	req.Header.Add("deviceType", "mobile")
 	req.Header.Add("ruStoreVerCode", "1061002")
 	req.Header.Add("Content-Type", "application/json; charset=utf-8")
 
@@ -215,72 +200,5 @@ func (s RuStore) FindLatestVersion(packageName string) (Version, error) {
 func init() {
 	s := RuStore{}
 	s.appsCache = make(map[string]map[string]any)
-	s.devices = []map[string]any{
-		{
-			"deviceId":               s.generateDeviceId(),
-			"deviceManufacturerName": "Google",
-			"deviceModelName":        "Pixel 9 Pro",
-			"deviceModel":            "Google Pixel 9 Pro",
-			"firmwareLang":           "en",
-			"androidSdkVer":          "35",
-			"firmwareVer":            "15",
-			"deviceType":             "mobile",
-		},
-		{
-			"deviceId":               s.generateDeviceId(),
-			"deviceManufacturerName": "Google",
-			"deviceModelName":        "Pixel 7 Pro",
-			"deviceModel":            "Google Pixel 7 Pro",
-			"firmwareLang":           "en",
-			"androidSdkVer":          "35",
-			"firmwareVer":            "15",
-			"deviceType":             "mobile",
-		}, {
-			"deviceId":               s.generateDeviceId(),
-			"deviceManufacturerName": "Google",
-			"deviceModelName":        "Pixel 9 Pro Fold",
-			"deviceModel":            "Google Pixel 9 Pro Fold",
-			"firmwareLang":           "en",
-			"androidSdkVer":          "35",
-			"firmwareVer":            "15",
-			"deviceType":             "mobile",
-		}, {
-			"deviceId":               s.generateDeviceId(),
-			"deviceManufacturerName": "Google",
-			"deviceModelName":        "Pixel Fold",
-			"deviceModel":            "Google Pixel Fold",
-			"firmwareLang":           "en",
-			"androidSdkVer":          "35",
-			"firmwareVer":            "15",
-			"deviceType":             "mobile",
-		}, {
-			"deviceId":               s.generateDeviceId(),
-			"deviceManufacturerName": "Google",
-			"deviceModelName":        "Pixel 8 Pro",
-			"deviceModel":            "Google Pixel 8 Pro",
-			"firmwareLang":           "en",
-			"androidSdkVer":          "35",
-			"firmwareVer":            "15",
-			"deviceType":             "mobile",
-		}, {
-			"deviceId":               s.generateDeviceId(),
-			"deviceManufacturerName": "Google",
-			"deviceModelName":        "Pixel 9 Pro XL",
-			"deviceModel":            "Google Pixel 9 Pro XL",
-			"firmwareLang":           "en",
-			"androidSdkVer":          "35",
-			"firmwareVer":            "15",
-			"deviceType":             "mobile",
-		}, {
-			"deviceId":               s.generateDeviceId(),
-			"deviceManufacturerName": "Xiaomi",
-			"deviceModelName":        "23127PN0CG",
-			"deviceModel":            "Xiaomi 23127PN0CG",
-			"firmwareLang":           "en",
-			"androidSdkVer":          "35",
-			"firmwareVer":            "15",
-			"deviceType":             "mobile",
-		},
-	}
 	Register(s)
 }

@@ -72,24 +72,9 @@ func readBody(res *http.Response) ([]byte, error) {
 }
 
 func downloadFile(link string) (io.ReadCloser, error) {
-	// outFile, err := os.Create(outputFile)
-	// if err != nil {
-	// 	return nil, err
-	// }
-	// defer outFile.Close()
 	resp, err := http.Get(link)
 	if err != nil {
 		return nil, err
 	}
 	return resp.Body, nil
-	// defer resp.Body.Close()
-	// progressReader := &ProgressReader{
-	// 	Reader:   resp.Body,
-	// 	Progress: bar,
-	// }
-	// _, err = io.Copy(outFile, progressReader)
-	// if err != nil {
-	// 	return nil, err
-	// }
-	// return os.Open(outputFile)
 }
