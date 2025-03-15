@@ -18,6 +18,7 @@ import (
 )
 
 var packageNames []string
+var packagesFile string
 var selectedSources []string
 var forceDownload bool
 
@@ -30,6 +31,23 @@ var rootCmd = cobra.Command{
 		}
 	},
 	Run: func(cmd *cobra.Command, args []string) {
+		if packagesFile != "" {
+			file, err := os.Open(packagesFile)
+			if err != nil {
+				fmt.Printf("Error opening file %s: %v\n", packagesFile, err)
+				os.Exit(1)
+			}
+			defer file.Close()
+
+			var packageName string
+			for {
+				_, err := fmt.Fscanf(file, "%s\n", &packageName)
+				if err != nil {
+					break
+				}
+				packageNames = append(packageNames, packageName)
+			}
+		}
 		if len(packageNames) > 0 {
 			downloadPackage(packageNames)
 		} else {
@@ -42,7 +60,8 @@ var rootCmd = cobra.Command{
 func main() {
 	rootCmd.PersistentFlags().StringArrayVarP(&packageNames, "package", "p", []string{}, "package name of the app")
 	rootCmd.PersistentFlags().StringArrayVarP(&selectedSources, "source", "s", []string{}, "Specify source(s) for downloading")
-	rootCmd.PersistentFlags().BoolVarP(&forceDownload, "force", "f", false, "Force download even if the file already exists")
+	rootCmd.PersistentFlags().BoolVarP(&forceDownload, "force", "F", false, "Force download even if the file already exists")
+	rootCmd.PersistentFlags().StringVarP(&packagesFile, "file", "f", "", "File containing package names")
 
 	if err := rootCmd.Execute(); err != nil {
 		fmt.Fprintln(os.Stderr, err)
