@@ -8,13 +8,27 @@ import (
 	"os"
 	"strings"
 
-	"github.com/vbauerster/mpb"
+	"github.com/vbauerster/mpb/v8"
 )
 
 type Source interface {
+	MaxParallelsDownloads() int
 	Name() string
 	FindLatestVersion(packageName string) (Version, error)
 	Download(version Version) (io.ReadCloser, error)
+}
+
+type BaseSource struct{}
+
+type Error struct {
+	error
+	SourceName  string
+	PackageName string
+	Err         error
+}
+
+func (s BaseSource) MaxParallelsDownloads() int {
+	return 1
 }
 
 type Version struct {
@@ -34,6 +48,14 @@ func (pr *ProgressReader) Read(p []byte) (int, error) {
 	n, err := pr.Reader.Read(p)
 	pr.Progress.IncrBy(n)
 	return n, err
+}
+
+type AppNotFoundError struct {
+	PackageName string
+}
+
+func (e *AppNotFoundError) Error() string {
+	return fmt.Sprintf("%s not found", e.PackageName)
 }
 
 var sources = make(map[string]Source)

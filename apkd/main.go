@@ -6,15 +6,19 @@ import (
 	"io"
 	"os"
 	"regexp"
+	"strconv"
 	"strings"
 	"sync"
+	"time"
 
 	_ "kiber-io/apkd/apkd/devices"
 	"kiber-io/apkd/apkd/sources"
 
+	"slices"
+
 	"github.com/spf13/cobra"
-	"github.com/vbauerster/mpb"
-	"github.com/vbauerster/mpb/decor"
+	"github.com/vbauerster/mpb/v8"
+	"github.com/vbauerster/mpb/v8/decor"
 )
 
 var packageNames []string
@@ -22,12 +26,30 @@ var packagesFile string
 var selectedSources []string
 var forceDownload bool
 
+var activeSources []sources.Source
+
 var rootCmd = cobra.Command{
 	Use:   "apkd",
 	Short: "apkd is a tool for downloading APKs from multiple sources",
 	PreRun: func(cmd *cobra.Command, args []string) {
 		for i, src := range selectedSources {
 			selectedSources[i] = strings.ToLower(src)
+		}
+		allSources := sources.GetAll()
+		if len(selectedSources) > 0 {
+			for src := range allSources {
+				if slices.Contains(selectedSources, src) {
+					activeSources = append(activeSources, allSources[src])
+				}
+			}
+		} else {
+			for src := range allSources {
+				activeSources = append(activeSources, allSources[src])
+			}
+		}
+		if len(activeSources) == 0 {
+			fmt.Println("No sources available. Please check your sources.")
+			os.Exit(1)
 		}
 	},
 	Run: func(cmd *cobra.Command, args []string) {
@@ -45,11 +67,15 @@ var rootCmd = cobra.Command{
 				if err != nil {
 					break
 				}
+				// support comments
+				if strings.HasPrefix(packageName, "#") {
+					continue
+				}
 				packageNames = append(packageNames, packageName)
 			}
 		}
 		if len(packageNames) > 0 {
-			downloadPackage(packageNames)
+			downloadPackages(packageNames)
 		} else {
 			fmt.Println("Please provide a package name using the --package flag")
 			os.Exit(1)
@@ -69,38 +95,26 @@ func main() {
 	}
 }
 
-func existsInArray(slice []string, item string) bool {
-	for _, s := range slice {
-		if s == item {
-			return true
-		}
-	}
-	return false
-}
-
-func getLatestVersion(packageName string) (sources.Version, sources.Source, error) {
+func getLatestVersion(packageName string) (sources.Version, sources.Source, []sources.Error) {
 	var wg sync.WaitGroup
 	var mu sync.Mutex
-	sourcesMap := sources.GetAll()
-	if len(selectedSources) > 0 {
-		for src := range sourcesMap {
-			if !existsInArray(selectedSources, src) {
-				delete(sourcesMap, src)
-			}
-		}
-	}
 	var latestSource sources.Source
 	var latestVersion sources.Version
-	if len(sourcesMap) == 0 {
-		return latestVersion, latestSource, errors.New("no sources found for downloading the package " + packageName)
-	}
-	for _, source := range sourcesMap {
+	var appNotFoundError *sources.AppNotFoundError
+	var sourcesErrors []sources.Error
+	for _, source := range activeSources {
 		wg.Add(1)
 		go func(src sources.Source) {
 			defer wg.Done()
 			version, err := src.FindLatestVersion(packageName)
 			if err != nil {
-				fmt.Printf("Error getting latest version from source %s: %v\n", src.Name(), err)
+				if !errors.As(err, &appNotFoundError) {
+					sourcesErrors = append(sourcesErrors, sources.Error{
+						SourceName:  src.Name(),
+						PackageName: packageName,
+						Err:         err,
+					})
+				}
 				return
 			}
 			mu.Lock()
@@ -114,10 +128,7 @@ func getLatestVersion(packageName string) (sources.Version, sources.Source, erro
 
 	wg.Wait()
 
-	if latestVersion == (sources.Version{}) || latestSource == nil {
-		return latestVersion, latestSource, errors.New("No version found for the package " + packageName)
-	}
-	return latestVersion, latestSource, nil
+	return latestVersion, latestSource, sourcesErrors
 }
 
 func sanitizeFileName(name string) string {
@@ -131,20 +142,95 @@ func sanitizeFileName(name string) string {
 	return safe
 }
 
-func downloadPackage(packageNames []string) {
+func downloadPackages(packageNames []string) {
 	var wg sync.WaitGroup
-	progress := mpb.New(mpb.WithWaitGroup(&wg))
+	var sourcesErrors []sources.Error
+	progress := mpb.New(mpb.WithAutoRefresh(), mpb.WithWaitGroup(&wg))
+	sourceLocks := make(map[string]*sync.Mutex)
+	sourceCounts := make(map[string]int)
+	mu := sync.Mutex{}
 
 	for _, packageName := range packageNames {
 		wg.Add(1)
 		go func(pkgName string) {
 			defer wg.Done()
 
-			version, source, err := getLatestVersion(pkgName)
-			if err != nil {
-				fmt.Printf("Error getting latest version for package %s from source %s: %v\n", pkgName, source.Name(), err)
+			barSearch := progress.AddBar(1,
+				mpb.PrependDecorators(
+					decor.Name(pkgName, decor.WC{C: decor.DSyncSpaceR}),
+					decor.Name(" [searching]", decor.WC{C: decor.DSyncSpaceR}),
+				),
+			)
+
+			version, source, errs := getLatestVersion(pkgName)
+			sourcesErrors = append(sourcesErrors, errs...)
+			barSearch.IncrBy(1)
+			if version == (sources.Version{}) || source == nil {
+				var errorText string
+				if len(errs) > 0 {
+					errorText = "error"
+				} else {
+					errorText = "not found"
+				}
+				barError := progress.AddBar(1,
+					mpb.BarQueueAfter(barSearch),
+					mpb.PrependDecorators(
+						decor.Name(pkgName, decor.WC{C: decor.DSyncSpaceR}),
+						decor.Name(" ["+errorText+"]", decor.WC{C: decor.DSyncSpaceR}),
+					),
+				)
+				barError.IncrBy(1)
 				return
 			}
+			barWait := progress.AddBar(1,
+				mpb.BarQueueAfter(barSearch),
+				mpb.PrependDecorators(
+					decor.Name(pkgName, decor.WC{C: decor.DSyncSpaceR}),
+					decor.Name(fmt.Sprintf("v%s", version.Name), decor.WC{C: decor.DSyncSpaceR}),
+					decor.Name(fmt.Sprintf("(%s)", strconv.Itoa(int(version.Code))), decor.WC{C: decor.DSyncSpaceR}),
+					decor.Name(source.Name(), decor.WC{C: decor.DSyncSpaceR}),
+					decor.Name(" [queued]", decor.WC{C: decor.DSyncSpaceR}),
+				),
+			)
+			bar := progress.AddBar(version.Size,
+				mpb.BarQueueAfter(barWait),
+				mpb.PrependDecorators(
+					decor.Name(pkgName, decor.WC{C: decor.DSyncSpaceR}),
+					decor.Name(fmt.Sprintf("v%s", version.Name), decor.WC{C: decor.DSyncSpaceR}),
+					decor.Name(fmt.Sprintf("(%s)", strconv.Itoa(int(version.Code))), decor.WC{C: decor.DSyncSpaceR}),
+					decor.Name(source.Name(), decor.WC{C: decor.DSyncSpaceR}),
+				),
+				mpb.AppendDecorators(
+					decor.Percentage(decor.WC{W: 5}),
+				),
+			)
+
+			mu.Lock()
+			if _, exists := sourceLocks[source.Name()]; !exists {
+				sourceLocks[source.Name()] = &sync.Mutex{}
+				sourceCounts[source.Name()] = 0
+			}
+			sourceLock := sourceLocks[source.Name()]
+			mu.Unlock()
+
+			for {
+				sourceLock.Lock()
+				if sourceCounts[source.Name()] < source.MaxParallelsDownloads() {
+					sourceCounts[source.Name()]++
+					sourceLock.Unlock()
+					break
+				}
+				sourceLock.Unlock()
+				// Wait before retrying
+				time.Sleep(100 * time.Millisecond)
+			}
+			barWait.IncrBy(1)
+
+			defer func() {
+				sourceLock.Lock()
+				sourceCounts[source.Name()]--
+				sourceLock.Unlock()
+			}()
 
 			outFile := fmt.Sprintf("%s-%s-v%d.apk", pkgName, version.Name, version.Code)
 			outFile = sanitizeFileName(outFile)
@@ -161,15 +247,8 @@ func downloadPackage(packageNames []string) {
 			reader, err := source.Download(version)
 			if err != nil {
 				fmt.Printf("Error downloading package %s from source %s: %v\n", pkgName, source.Name(), err)
+				return
 			}
-			bar := progress.AddBar(version.Size,
-				mpb.PrependDecorators(
-					decor.Name(fmt.Sprintf("%s | %s: ", pkgName, source.Name())),
-				),
-				mpb.AppendDecorators(
-					decor.CountersKibiByte("% .2f / % .2f"),
-				),
-			)
 			progressReader := bar.ProxyReader(reader)
 			defer progressReader.Close()
 			file, err := os.Create(outFile)
@@ -185,5 +264,13 @@ func downloadPackage(packageNames []string) {
 			}
 		}(packageName)
 	}
+	wg.Wait()
 	progress.Wait()
+
+	if len(sourcesErrors) > 0 {
+		fmt.Println("\nErrors:")
+		for _, err := range sourcesErrors {
+			fmt.Printf("  Source: %s, Package: %s, Error: %s\n", err.SourceName, err.PackageName, err.Err.Error())
+		}
+	}
 }

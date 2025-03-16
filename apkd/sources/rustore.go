@@ -13,6 +13,7 @@ import (
 )
 
 type RuStore struct {
+	BaseSource
 	appsCache map[string]map[string]any
 }
 
@@ -111,7 +112,7 @@ func (s RuStore) getAppInfo(packageName string) (map[string]any, error) {
 		s.appsCache[packageName] = appInfo
 		return appInfo, nil
 	}
-	return nil, nil
+	return nil, &AppNotFoundError{PackageName: packageName}
 }
 
 func (s RuStore) getDownloadLink(appId float64) (string, error) {
@@ -195,6 +196,10 @@ func (s RuStore) FindLatestVersion(packageName string) (Version, error) {
 		PackageName: packageName,
 	}
 	return version, nil
+}
+
+func (s RuStore) MaxParallelsDownloads() int {
+	return 3
 }
 
 func init() {

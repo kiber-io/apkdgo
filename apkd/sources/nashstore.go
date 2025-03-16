@@ -12,7 +12,9 @@ import (
 	"golang.org/x/text/language"
 )
 
-type NashStore struct{}
+type NashStore struct {
+	BaseSource
+}
 
 func (s NashStore) Name() string {
 	return "nashstore"
@@ -118,7 +120,7 @@ func (s NashStore) getAppInfo(packageName string) (map[string]any, error) {
 			return appInfo, nil
 		}
 	}
-	return nil, nil
+	return nil, &AppNotFoundError{PackageName: packageName}
 }
 
 func (s NashStore) FindLatestVersion(packageName string) (Version, error) {
@@ -142,6 +144,10 @@ func (s NashStore) FindLatestVersion(packageName string) (Version, error) {
 
 func (s NashStore) Download(version Version) (io.ReadCloser, error) {
 	return downloadFile(version.Link)
+}
+
+func (s NashStore) MaxParallelsDownloads() int {
+	return 3
 }
 
 func init() {
