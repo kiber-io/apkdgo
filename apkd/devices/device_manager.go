@@ -35,7 +35,7 @@ type Device struct {
 	ScreenHeight        int       `properties:"Screen.Height,default=0"`
 	ScreenWidth         int       `properties:"Screen.Width,default=0"`
 	ScreenDensity       int       `properties:"Screen.Density,default=0"`
-	Platforms           PropArray `properties:"Platforms,default="`
+	Platforms           PropArray `properties:"Platforms,default=arm64-v8a,armeabi-v7a,x86,x86_64"`
 	SimOperator         int       `properties:"SimOperator,default=0"`
 	Features            PropArray `properties:"Features,default="`
 	BuildRadio          string    `properties:"Build.RADIO,default="`
