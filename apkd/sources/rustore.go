@@ -181,7 +181,7 @@ func (s RuStore) getDownloadLink(appId float64) (string, error) {
 	return downloadUrl["url"].(string), nil
 }
 
-func (s RuStore) FindLatestVersion(packageName string) (Version, error) {
+func (s RuStore) FindByPackage(packageName string) (Version, error) {
 	appInfo, err := s.getAppInfo(packageName)
 	if err != nil {
 		return Version{}, err
@@ -189,17 +189,52 @@ func (s RuStore) FindLatestVersion(packageName string) (Version, error) {
 	size := appInfo["fileSize"].(float64)
 	versionName := appInfo["versionName"].(string)
 	versionCode := appInfo["versionCode"].(float64)
+	developerId := appInfo["publicCompanyId"].(string)
 	version := Version{
 		Name:        versionName,
 		Code:        int64(versionCode),
 		Size:        int64(size),
 		PackageName: packageName,
+		DeveloperId: developerId,
 	}
 	return version, nil
 }
 
 func (s RuStore) MaxParallelsDownloads() int {
 	return 3
+}
+
+func (s RuStore) FindByDeveloper(developerId string) ([]string, error) {
+	url := "https://backapi.rustore.ru/applicationData/devs/" + developerId + "/apps?limit=99999"
+	req, err := http.NewRequest("GET", url, nil)
+	if err != nil {
+		return nil, err
+	}
+	res, err := http.DefaultClient.Do(req)
+
+	if err != nil {
+		return nil, err
+	}
+
+	defer res.Body.Close()
+	body, err := readBody(res)
+	if err != nil {
+		return nil, err
+	}
+	var result map[string]any
+	if err := json.Unmarshal(body, &result); err != nil {
+		return nil, err
+	}
+	if result["code"] != "OK" {
+		return nil, errors.New(result["message"].(string))
+	}
+	var versions []string
+	for _, app := range result["body"].(map[string]any)["elements"].([]any) {
+		appInfo := app.(map[string]any)
+		packageName := appInfo["packageName"].(string)
+		versions = append(versions, packageName)
+	}
+	return versions, nil
 }
 
 func init() {

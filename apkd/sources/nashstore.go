@@ -123,11 +123,12 @@ func (s NashStore) getAppInfo(packageName string) (map[string]any, error) {
 	return nil, &AppNotFoundError{PackageName: packageName}
 }
 
-func (s NashStore) FindLatestVersion(packageName string) (Version, error) {
+func (s NashStore) FindByPackage(packageName string) (Version, error) {
 	appInfo, err := s.getAppInfo(packageName)
 	if err != nil {
 		return Version{}, err
 	}
+	appId := appInfo["id"].(string)
 	size := appInfo["size"].(float64)
 	release := appInfo["release"].(map[string]any)
 	versionName := release["version_name"].(string)
@@ -138,6 +139,8 @@ func (s NashStore) FindLatestVersion(packageName string) (Version, error) {
 		Code: int64(versionCode),
 		Size: int64(size),
 		Link: link,
+		// for NashStore developerId is useless because all developer apps are comming in app card
+		DeveloperId: appId,
 	}
 	return version, nil
 }
@@ -148,6 +151,80 @@ func (s NashStore) Download(version Version) (io.ReadCloser, error) {
 
 func (s NashStore) MaxParallelsDownloads() int {
 	return 3
+}
+
+func (s NashStore) FindByDeveloper(developerId string) ([]string, error) {
+	// for NashStore developerId == appId
+	url := "https://store.nashstore.ru/api/mobile/v1/application/6286364efb3ed3501d52ba65"
+
+	req, err := http.NewRequest("GET", url, nil)
+
+	if err != nil {
+		return nil, err
+	}
+	device := devices.GetRandomDevice()
+	caser := cases.Title(language.English)
+	deviceBrand := caser.String(device.BuildBrand)
+	req.Header.Add("User-Agent", "Nashstore [com.nashstore][0.0.6]["+deviceBrand+"]")
+	req.Header.Add("Accept", "application/json, text/plain, */*")
+	req.Header.Add("Accept-Encoding", "gzip")
+	req.Header.Add("Content-Type", "application/json")
+	req.Header.Add("xaccesstoken", s.answer42())
+	appHeader := map[string]any{
+		"androidId":   device.GenerateAndroidID(),
+		"apiLevel":    device.BuildVersionSdkInt,
+		"baseOs":      "",
+		"buildId":     device.BuildId,
+		"carrier":     "T-Mobile",
+		"deviceName":  device.BuildModel,
+		"fingerprint": device.BuildFingerprint,
+		"fontScale":   1,
+		"brand":       device.BuildBrand,
+		"deviceId":    device.BuildDevice,
+		"width":       device.ScreenWidth,
+		"height":      device.ScreenHeight,
+		"scale":       2.625,
+	}
+	appHeaderBytes, err := json.Marshal(appHeader)
+	if err != nil {
+		return nil, err
+	}
+
+	req.Header.Add("nashstore-app", string(appHeaderBytes))
+
+	res, err := http.DefaultClient.Do(req)
+
+	if err != nil {
+		return nil, err
+	}
+
+	defer res.Body.Close()
+	body, err := readBody(res)
+	if err != nil {
+		return nil, err
+	}
+	var result map[string]any
+	if err := json.Unmarshal(body, &result); err != nil {
+		return nil, err
+	}
+	if res.StatusCode != http.StatusOK {
+		return nil, errors.New("failed to get app info (" + res.Status + "): " + string(body))
+	}
+	app := result["app"].(map[string]any)
+	if app == nil {
+		return nil, errors.New("app not found")
+	}
+	var packages []string
+	otherApps := app["other_apps"].(map[string]any)
+	if otherApps != nil {
+		apps := otherApps["apps"].([]any)
+		for _, app := range apps {
+			appInfo := app.(map[string]any)
+			packages = append(packages, appInfo["app_id"].(string))
+		}
+	}
+
+	return packages, nil
 }
 
 func init() {

@@ -14,7 +14,8 @@ import (
 type Source interface {
 	MaxParallelsDownloads() int
 	Name() string
-	FindLatestVersion(packageName string) (Version, error)
+	FindByPackage(packageName string) (Version, error)
+	FindByDeveloper(developerId string) ([]string, error)
 	Download(version Version) (io.ReadCloser, error)
 }
 
@@ -37,6 +38,7 @@ type Version struct {
 	Size        int64
 	Link        string
 	PackageName string
+	DeveloperId string
 }
 
 type ProgressReader struct {
