@@ -77,16 +77,6 @@ var rootCmd = cobra.Command{
 			if warn != nil {
 				fmt.Println("Warning:", warn)
 			}
-			// outputDir, err := filepath.Abs(outputDir)
-			// if err != nil {
-			// 	fmt.Printf("Error getting absolute path for output directory %s: %v\n", outputDir, err)
-			// 	os.Exit(1)
-			// }
-			// sanitizedName := sanitizeFileName(outputDir)
-			// if outputDir != sanitizedName {
-			// 	fmt.Printf("Output directory name %s is not valid. Using %s instead.\n", outputDir, sanitizedName)
-			// 	outputDir = sanitizedName
-			// }
 			info, err := os.Stat(outputDir)
 			if os.IsNotExist(err) {
 				err = os.MkdirAll(outputDir, 0755)
@@ -115,18 +105,6 @@ var rootCmd = cobra.Command{
 			if warn != nil {
 				fmt.Println("Warning:", warn)
 			}
-			// outputFileName, err := filepath.Abs(outputFileName)
-			// if err != nil {
-			// 	fmt.Printf("Error getting absolute path for output file %s: %v\n", outputFileName, err)
-			// 	os.Exit(1)
-			// }
-			// baseOutputFileName := filepath.Base(outputFileName)
-			// sanitizedName := sanitizeFileName(baseOutputFileName)
-			// if baseOutputFileName != sanitizedName {
-			// 	fmt.Printf("Output file name %s is not valid. Using %s instead.\n", baseOutputFileName, sanitizedName)
-			// 	baseOutputFileName = sanitizedName
-			// }
-			// outputFileName = filepath.Join(filepath.Dir(outputFileName), baseOutputFileName)
 			if _, err := os.Stat(outputFileName); os.IsExist(err) {
 				if !forceDownload {
 					fmt.Printf("Output file %s already exists. Use --force to overwrite.\n", outputFileName)
