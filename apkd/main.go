@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"path/filepath"
 	"regexp"
 	"strconv"
 	"strings"
@@ -26,6 +27,7 @@ var packagesFile string
 var forceDownload bool
 var batchDeveloperDownloadMode bool
 var outputDir string
+var outputFileName string
 
 var selectedSources []string
 var activeSources []sources.Source
@@ -67,10 +69,67 @@ var rootCmd = cobra.Command{
 			os.Exit(1)
 		}
 		if outputDir != "" {
-			if _, err := os.Stat(outputDir); os.IsNotExist(err) {
+			outputDir, err, warn := sanitizedAndAbsoluteName(outputDir)
+			if err != nil {
+				fmt.Printf("Error getting absolute path for output directory %s: %v\n", outputDir, err)
+				os.Exit(1)
+			}
+			if warn != nil {
+				fmt.Println("Warning:", warn)
+			}
+			// outputDir, err := filepath.Abs(outputDir)
+			// if err != nil {
+			// 	fmt.Printf("Error getting absolute path for output directory %s: %v\n", outputDir, err)
+			// 	os.Exit(1)
+			// }
+			// sanitizedName := sanitizeFileName(outputDir)
+			// if outputDir != sanitizedName {
+			// 	fmt.Printf("Output directory name %s is not valid. Using %s instead.\n", outputDir, sanitizedName)
+			// 	outputDir = sanitizedName
+			// }
+			info, err := os.Stat(outputDir)
+			if os.IsNotExist(err) {
 				err = os.MkdirAll(outputDir, 0755)
 				if err != nil {
 					fmt.Printf("Error creating output directory %s: %v\n", outputDir, err)
+					os.Exit(1)
+				}
+			} else if err != nil {
+				fmt.Printf("Error checking output directory %s: %v\n", outputDir, err)
+				os.Exit(1)
+			} else if !info.IsDir() {
+				fmt.Printf("Output path %s is not a directory\n", outputDir)
+				os.Exit(1)
+			}
+		}
+		if outputFileName != "" {
+			if len(packageNames) > 1 {
+				fmt.Println("Output file name is not supported when downloading multiple packages.")
+				os.Exit(1)
+			}
+			outputFileName, err, warn := sanitizedAndAbsoluteName(outputFileName)
+			if err != nil {
+				fmt.Printf("Error getting absolute path for output file %s: %v\n", outputFileName, err)
+				os.Exit(1)
+			}
+			if warn != nil {
+				fmt.Println("Warning:", warn)
+			}
+			// outputFileName, err := filepath.Abs(outputFileName)
+			// if err != nil {
+			// 	fmt.Printf("Error getting absolute path for output file %s: %v\n", outputFileName, err)
+			// 	os.Exit(1)
+			// }
+			// baseOutputFileName := filepath.Base(outputFileName)
+			// sanitizedName := sanitizeFileName(baseOutputFileName)
+			// if baseOutputFileName != sanitizedName {
+			// 	fmt.Printf("Output file name %s is not valid. Using %s instead.\n", baseOutputFileName, sanitizedName)
+			// 	baseOutputFileName = sanitizedName
+			// }
+			// outputFileName = filepath.Join(filepath.Dir(outputFileName), baseOutputFileName)
+			if _, err := os.Stat(outputFileName); os.IsExist(err) {
+				if !forceDownload {
+					fmt.Printf("Output file %s already exists. Use --force to overwrite.\n", outputFileName)
 					os.Exit(1)
 				}
 			}
@@ -123,7 +182,8 @@ func main() {
 	rootCmd.PersistentFlags().StringVarP(&packagesFile, "file", "f", "", "file containing package names")
 	rootCmd.PersistentFlags().BoolVarP(&batchDeveloperDownloadMode, "dev", "", false, "download all apps from developer")
 	rootCmd.PersistentFlags().BoolVarP(&forceDownload, "force", "F", false, "force download even if the file already exists")
-	rootCmd.PersistentFlags().StringVarP(&outputDir, "output", "o", "", "output directory for downloaded APKs")
+	rootCmd.PersistentFlags().StringVarP(&outputDir, "output-dir", "O", "", "output directory for downloaded APKs")
+	rootCmd.PersistentFlags().StringVarP(&outputFileName, "output-file", "o", "", "output file name for downloaded APKs")
 
 	if err := rootCmd.Execute(); err != nil {
 		fmt.Fprintln(os.Stderr, err)
@@ -178,7 +238,22 @@ func sanitizeFileName(name string) string {
 	return safe
 }
 
+func sanitizedAndAbsoluteName(name string) (string, error, error) {
+	absPath, err := filepath.Abs(name)
+	if err != nil {
+		return "", err, nil
+	}
+	base := filepath.Base(absPath)
+	sanitizedName := sanitizeFileName(base)
+	absPath = filepath.Join(filepath.Dir(absPath), sanitizedName)
+	if base != sanitizedName {
+		return absPath, nil, fmt.Errorf("name %s is not valid. Using %s instead", base, sanitizedName)
+	}
+	return absPath, nil, nil
+}
+
 func showErrorBar(progress *mpb.Progress, prevBar *mpb.Bar, pkgName string, errorText string) {
+	prevBar.Abort(false)
 	barError := progress.AddBar(1,
 		mpb.BarQueueAfter(prevBar),
 		mpb.PrependDecorators(
@@ -287,8 +362,13 @@ func downloadPackage(pkgName string, disableBatchDeveloperDownloadMode bool) []s
 		sourceLock.Unlock()
 	}()
 
-	outFile := fmt.Sprintf("%s-%s-v%d.apk", pkgName, version.Name, version.Code)
-	outFile = sanitizeFileName(outFile)
+	var outFile string
+	if outputFileName != "" {
+		outFile = outputFileName
+	} else {
+		outFile = fmt.Sprintf("%s-%s-v%d.apk", pkgName, version.Name, version.Code)
+		outFile = sanitizeFileName(outFile)
+	}
 	if outputDir != "" {
 		outFile = fmt.Sprintf("%s/%s", outputDir, outFile)
 	}
