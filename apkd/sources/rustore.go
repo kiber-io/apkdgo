@@ -181,18 +181,21 @@ func (s RuStore) getDownloadLink(appId float64) (string, error) {
 	return downloadUrl["url"].(string), nil
 }
 
-func (s RuStore) FindByPackage(packageName string) (Version, error) {
+func (s RuStore) FindByPackage(packageName string, versionCode int64) (Version, error) {
 	appInfo, err := s.getAppInfo(packageName)
 	if err != nil {
 		return Version{}, err
 	}
 	size := appInfo["fileSize"].(float64)
 	versionName := appInfo["versionName"].(string)
-	versionCode := appInfo["versionCode"].(float64)
+	versionCodeApi := appInfo["versionCode"].(float64)
+	if versionCode != 0 && versionCode != int64(versionCodeApi) {
+		return Version{}, &AppNotFoundError{PackageName: packageName}
+	}
 	developerId := appInfo["publicCompanyId"].(string)
 	version := Version{
 		Name:        versionName,
-		Code:        int64(versionCode),
+		Code:        int64(versionCodeApi),
 		Size:        int64(size),
 		PackageName: packageName,
 		DeveloperId: developerId,

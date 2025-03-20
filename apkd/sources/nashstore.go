@@ -123,7 +123,7 @@ func (s NashStore) getAppInfo(packageName string) (map[string]any, error) {
 	return nil, &AppNotFoundError{PackageName: packageName}
 }
 
-func (s NashStore) FindByPackage(packageName string) (Version, error) {
+func (s NashStore) FindByPackage(packageName string, versionCode int64) (Version, error) {
 	appInfo, err := s.getAppInfo(packageName)
 	if err != nil {
 		return Version{}, err
@@ -132,7 +132,10 @@ func (s NashStore) FindByPackage(packageName string) (Version, error) {
 	size := appInfo["size"].(float64)
 	release := appInfo["release"].(map[string]any)
 	versionName := release["version_name"].(string)
-	versionCode := release["version_code"].(float64)
+	versionCodeApi := release["version_code"].(float64)
+	if versionCode != 0 && versionCode != int64(versionCodeApi) {
+		return Version{}, &AppNotFoundError{PackageName: packageName}
+	}
 	link := release["install_path"].(string)
 	version := Version{
 		Name: versionName,

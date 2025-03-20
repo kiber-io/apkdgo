@@ -22,12 +22,13 @@ import (
 	"github.com/vbauerster/mpb/v8/decor"
 )
 
-var packageNames []string
-var packagesFile string
+var packageNamesMap = make(map[string]int64)
 var forceDownload bool
 var batchDeveloperDownloadMode bool
 var outputDir string
 var outputFileName string
+var packagesFile string
+var packageNames []string
 
 var selectedSources []string
 var activeSources []sources.Source
@@ -49,6 +50,48 @@ var rootCmd = cobra.Command{
 	Use:   "apkd",
 	Short: "apkd is a tool for downloading APKs from multiple sources",
 	PreRun: func(cmd *cobra.Command, args []string) {
+		if packagesFile != "" {
+			file, err := os.Open(packagesFile)
+			if err != nil {
+				fmt.Printf("Error opening file %s: %v\n", packagesFile, err)
+				os.Exit(1)
+			}
+			defer file.Close()
+
+			var packageName string
+			for {
+				_, err := fmt.Fscanf(file, "%s\n", &packageName)
+				if err != nil {
+					break
+				}
+				// support comments
+				if strings.HasPrefix(packageName, "#") {
+					continue
+				}
+				packageNames = append(packageNames, packageName)
+			}
+		}
+
+		for _, pkgName := range packageNames {
+			var versionCode int64
+			if strings.Contains(pkgName, ":") {
+				parts := strings.Split(pkgName, ":")
+				pkgName = parts[0]
+				var err error
+				versionCode, err = strconv.ParseInt(parts[1], 10, 64)
+				if err != nil {
+					fmt.Printf("Error parsing version code for package %s: %v\n", pkgName, err)
+					os.Exit(1)
+				}
+			}
+			packageNamesMap[pkgName] = versionCode
+		}
+
+		if len(packageNamesMap) == 0 {
+			fmt.Println("No package names provided. Use --package or --file to specify package names.")
+			os.Exit(1)
+		}
+
 		for i, src := range selectedSources {
 			selectedSources[i] = strings.ToLower(src)
 		}
@@ -93,7 +136,7 @@ var rootCmd = cobra.Command{
 			}
 		}
 		if outputFileName != "" {
-			if len(packageNames) > 1 {
+			if len(packageNamesMap) > 1 {
 				fmt.Println("Output file name is not supported when downloading multiple packages.")
 				os.Exit(1)
 			}
@@ -114,42 +157,16 @@ var rootCmd = cobra.Command{
 		}
 	},
 	Run: func(cmd *cobra.Command, args []string) {
-		if packagesFile != "" {
-			file, err := os.Open(packagesFile)
-			if err != nil {
-				fmt.Printf("Error opening file %s: %v\n", packagesFile, err)
-				os.Exit(1)
-			}
-			defer file.Close()
+		processPackages(packageNamesMap, false)
 
-			var packageName string
-			for {
-				_, err := fmt.Fscanf(file, "%s\n", &packageName)
-				if err != nil {
-					break
-				}
-				// support comments
-				if strings.HasPrefix(packageName, "#") {
-					continue
-				}
-				packageNames = append(packageNames, packageName)
-			}
-		}
-		if len(packageNames) > 0 {
-			processPackages(packageNames, false)
+		wg.Wait()
+		progress.Wait()
 
-			wg.Wait()
-			progress.Wait()
-
-			if len(collectedErrors) > 0 {
-				fmt.Println("\nErrors:")
-				for _, err := range collectedErrors {
-					fmt.Printf("- %s\n", err)
-				}
+		if len(collectedErrors) > 0 {
+			fmt.Println("\nErrors:")
+			for _, err := range collectedErrors {
+				fmt.Printf("- %s\n", err)
 			}
-		} else {
-			fmt.Println("Please provide a package name using the --package flag")
-			os.Exit(1)
 		}
 	},
 }
@@ -169,7 +186,7 @@ func main() {
 	}
 }
 
-func getLatestVersion(packageName string) (sources.Version, sources.Source, []sources.Error) {
+func findVersion(packageName string, versionCode int64) (sources.Version, sources.Source, []sources.Error) {
 	var wg sync.WaitGroup
 	var mu sync.Mutex
 	var latestSource sources.Source
@@ -180,7 +197,7 @@ func getLatestVersion(packageName string) (sources.Version, sources.Source, []so
 		wg.Add(1)
 		go func(src sources.Source) {
 			defer wg.Done()
-			version, err := src.FindByPackage(packageName)
+			version, err := src.FindByPackage(packageName, versionCode)
 			if err != nil {
 				if !errors.As(err, &appNotFoundError) {
 					sourcesErrors = append(sourcesErrors, sources.Error{
@@ -242,26 +259,30 @@ func showErrorBar(progress *mpb.Progress, prevBar *mpb.Bar, pkgName string, erro
 	barError.IncrBy(1)
 }
 
-func processPackages(packageNames []string, disableBatchDeveloperDownloadMode bool) {
-	for _, packageName := range packageNames {
+func processPackages(packageNamesMap map[string]int64, disableBatchDeveloperDownloadMode bool) {
+	for packageName, versionCode := range packageNamesMap {
 		wg.Add(1)
-		go func(pkgName string) {
+		go func(pkgName string, versionCode int64) {
 			defer wg.Done()
-			errs := downloadPackage(pkgName, disableBatchDeveloperDownloadMode)
+			errs := downloadPackage(pkgName, versionCode, disableBatchDeveloperDownloadMode)
 			collectedErrors = append(collectedErrors, errs...)
-		}(packageName)
+		}(packageName, versionCode)
 	}
 }
 
-func downloadPackage(pkgName string, disableBatchDeveloperDownloadMode bool) []string {
+func downloadPackage(pkgName string, versionCode int64, disableBatchDeveloperDownloadMode bool) []string {
+	taskName := pkgName
+	if versionCode != 0 {
+		taskName = fmt.Sprintf("%s (%d)", pkgName, versionCode)
+	}
 	barSearch := progress.AddBar(1,
 		mpb.PrependDecorators(
-			decor.Name(pkgName, decor.WC{C: decor.DSyncSpaceR}),
+			decor.Name(taskName, decor.WC{C: decor.DSyncSpaceR}),
 			decor.Name(" [searching]", decor.WC{C: decor.DSyncSpaceR}),
 		),
 	)
 
-	version, source, errs := getLatestVersion(pkgName)
+	version, source, errs := findVersion(pkgName, versionCode)
 	for _, err := range errs {
 		collectedErrors = append(collectedErrors, fmt.Sprintf("Source: %s, Package: %s, Error: %s", err.SourceName, err.PackageName, err.Err.Error()))
 	}
@@ -272,7 +293,7 @@ func downloadPackage(pkgName string, disableBatchDeveloperDownloadMode bool) []s
 		} else {
 			errorText = "not found"
 		}
-		showErrorBar(progress, barSearch, pkgName, errorText)
+		showErrorBar(progress, barSearch, taskName, errorText)
 		return collectedErrors
 	}
 
@@ -280,12 +301,17 @@ func downloadPackage(pkgName string, disableBatchDeveloperDownloadMode bool) []s
 		packages, err := source.FindByDeveloper(version.DeveloperId)
 		if err != nil {
 			collectedErrors = append(collectedErrors, fmt.Sprintf("Error finding versions by developer %s at source %s: %v", version.DeveloperId, source.Name(), err))
-			showErrorBar(progress, barSearch, pkgName, "error")
+			showErrorBar(progress, barSearch, taskName, "error")
 			return collectedErrors
 		}
-		packages = removeElements(packages, packageNames)
-		if len(packages) > 0 {
-			go processPackages(packages, true)
+		var newPackages = make(map[string]int64)
+		for _, pkg := range packages {
+			if _, ok := packageNamesMap[pkg]; !ok {
+				newPackages[pkg] = 0
+			}
+		}
+		if len(newPackages) > 0 {
+			go processPackages(newPackages, true)
 		}
 	}
 	barWait := progress.AddBar(1,

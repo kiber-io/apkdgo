@@ -14,7 +14,7 @@ import (
 type Source interface {
 	MaxParallelsDownloads() int
 	Name() string
-	FindByPackage(packageName string) (Version, error)
+	FindByPackage(packageName string, versionCode int64) (Version, error)
 	FindByDeveloper(developerId string) ([]string, error)
 	Download(version Version) (io.ReadCloser, error)
 }
@@ -30,6 +30,10 @@ type Error struct {
 
 func (s BaseSource) MaxParallelsDownloads() int {
 	return 1
+}
+
+func (s BaseSource) FindByDeveloper(developerId string) ([]string, error) {
+	return nil, nil
 }
 
 type Version struct {
