@@ -3,7 +3,7 @@ package sources
 import (
 	"bytes"
 	"encoding/json"
-	"errors"
+	"fmt"
 	"io"
 	"kiber-io/apkd/apkd/devices"
 	"net/http"
@@ -11,6 +11,23 @@ import (
 	"golang.org/x/text/cases"
 	"golang.org/x/text/language"
 )
+
+type ReleaseNashStore struct {
+	VersionCode int    `json:"version_code"`
+	VersionName string `json:"version_name"`
+	Link        string `json:"install_path"`
+}
+
+type AppNashStore struct {
+	PackageName string           `json:"app_id"`
+	Id          string           `json:"id"`
+	Release     ReleaseNashStore `json:"release"`
+	Size        float64
+}
+
+type AppInfoNashStore struct {
+	App AppNashStore `json:"app"`
+}
 
 type NashStore struct {
 	BaseSource
@@ -39,7 +56,8 @@ func (s NashStore) answer42() string {
 	return string(encrypted)
 }
 
-func (s NashStore) getAppInfo(packageName string) (map[string]any, error) {
+func (s NashStore) getAppInfo(packageName string) (AppInfoNashStore, error) {
+	var appInfo AppInfoNashStore
 	url := "https://store.nashstore.ru/api/mobile/v1/profile/updates"
 	payloadData := map[string]any{
 		"apps": map[string]any{
@@ -55,28 +73,30 @@ func (s NashStore) getAppInfo(packageName string) (map[string]any, error) {
 	}
 	payloadBytes, err := json.Marshal(payloadData)
 	if err != nil {
-		return nil, err
+		return appInfo, err
 	}
 	payload := bytes.NewReader(payloadBytes)
 	req, err := http.NewRequest("POST", url, payload)
 
 	if err != nil {
-		return nil, err
+		return appInfo, err
 	}
 	device := devices.GetRandomDevice()
 	caser := cases.Title(language.English)
 	deviceBrand := caser.String(device.BuildBrand)
-	req.Header.Add("User-Agent", "Nashstore [com.nashstore][0.0.6]["+deviceBrand+"]")
+	req.Header.Add("User-Agent", "Nashstore [com.nashstore][0.0.6]["+deviceBrand)
 	req.Header.Add("Accept", "application/json, text/plain, */*")
 	req.Header.Add("Accept-Encoding", "gzip")
 	req.Header.Add("Content-Type", "application/json")
-	req.Header.Add("xaccesstoken", s.answer42())
+	tok := s.answer42()
+	req.Header.Add("xaccesstoken", tok)
+	req.Header.Add("Cookie", "nashstore_token="+tok)
 	appHeader := map[string]any{
 		"androidId":   device.GenerateAndroidID(),
 		"apiLevel":    device.BuildVersionSdkInt,
 		"baseOs":      "",
 		"buildId":     device.BuildId,
-		"carrier":     "T-Mobile",
+		"carrier":     "MTS",
 		"deviceName":  device.BuildModel,
 		"fingerprint": device.BuildFingerprint,
 		"fontScale":   1,
@@ -88,7 +108,7 @@ func (s NashStore) getAppInfo(packageName string) (map[string]any, error) {
 	}
 	appHeaderBytes, err := json.Marshal(appHeader)
 	if err != nil {
-		return nil, err
+		return appInfo, err
 	}
 
 	req.Header.Add("nashstore-app", string(appHeaderBytes))
@@ -96,55 +116,59 @@ func (s NashStore) getAppInfo(packageName string) (map[string]any, error) {
 	res, err := http.DefaultClient.Do(req)
 
 	if err != nil {
-		return nil, err
+		return appInfo, err
 	}
 
 	defer res.Body.Close()
 	body, err := readBody(res)
 	if err != nil {
-		return nil, err
+		return appInfo, err
 	}
 	if res.StatusCode != http.StatusOK {
-		return nil, errors.New("failed to get app info (" + res.Status + "): " + string(body))
+		return appInfo, fmt.Errorf("failed to get app info (" + res.Status + "): " + string(body))
 	}
 	var result map[string]any
 	if err := json.Unmarshal(body, &result); err != nil {
-		return nil, err
+		return appInfo, err
 	}
 	if list, ok := result["list"].([]any); ok {
 		if len(list) > 1 {
-			return nil, errors.New("multiple apps found")
+			return appInfo, fmt.Errorf("multiple apps found")
+		} else if len(list) == 0 {
+			return appInfo, &AppNotFoundError{PackageName: packageName}
 		}
 		if len(list) == 1 {
-			appInfo := list[0].(map[string]any)
+			jsonAppInfo, err := json.Marshal(list[0])
+			if err != nil {
+				return appInfo, err
+			}
+			if err := json.Unmarshal(jsonAppInfo, &appInfo.App); err != nil {
+				return appInfo, err
+			}
+			appInfo2 := list[0].(map[string]any)
+			appInfo.App.Size = appInfo2["size"].(float64)
 			return appInfo, nil
 		}
 	}
-	return nil, &AppNotFoundError{PackageName: packageName}
+	return appInfo, fmt.Errorf("failed to parse app info")
 }
 
-func (s NashStore) FindByPackage(packageName string, versionCode int64) (Version, error) {
+func (s NashStore) FindByPackage(packageName string, versionCode int) (Version, error) {
+	var version Version
 	appInfo, err := s.getAppInfo(packageName)
 	if err != nil {
-		return Version{}, err
+		return version, err
 	}
-	appId := appInfo["id"].(string)
-	size := appInfo["size"].(float64)
-	release := appInfo["release"].(map[string]any)
-	versionName := release["version_name"].(string)
-	versionCodeApi := release["version_code"].(float64)
-	if versionCode != 0 && versionCode != int64(versionCodeApi) {
+	if versionCode != 0 && versionCode != appInfo.App.Release.VersionCode {
 		return Version{}, &AppNotFoundError{PackageName: packageName}
 	}
-	link := release["install_path"].(string)
-	version := Version{
-		Name: versionName,
-		Code: int64(versionCode),
-		Size: int64(size),
-		Link: link,
-		// for NashStore developerId is useless because all developer apps are comming in app card
-		DeveloperId: appId,
-	}
+	version.Name = appInfo.App.Release.VersionName
+	version.Code = appInfo.App.Release.VersionCode
+	version.Size = appInfo.App.Size
+	version.PackageName = appInfo.App.PackageName
+	version.DeveloperId = appInfo.App.Id
+	version.Link = appInfo.App.Release.Link
+
 	return version, nil
 }
 
@@ -156,9 +180,9 @@ func (s NashStore) MaxParallelsDownloads() int {
 	return 3
 }
 
-func (s NashStore) FindByDeveloper(developerId string) ([]string, error) {
-	// for NashStore developerId == appId
-	url := "https://store.nashstore.ru/api/mobile/v1/application/6286364efb3ed3501d52ba65"
+func (s NashStore) FindByDeveloper(developerId string) ([]Version, error) {
+	// for NashStore we use appId as developerId
+	url := "https://store.nashstore.ru/api/mobile/v1/application/" + developerId
 
 	req, err := http.NewRequest("GET", url, nil)
 
@@ -211,23 +235,40 @@ func (s NashStore) FindByDeveloper(developerId string) ([]string, error) {
 		return nil, err
 	}
 	if res.StatusCode != http.StatusOK {
-		return nil, errors.New("failed to get app info (" + res.Status + "): " + string(body))
+		return nil, fmt.Errorf("failed to get app info (" + res.Status + "): " + string(body))
 	}
 	app := result["app"].(map[string]any)
 	if app == nil {
-		return nil, errors.New("app not found")
+		return nil, fmt.Errorf("app not found")
 	}
-	var packages []string
+	var versions []Version
 	otherApps := app["other_apps"].(map[string]any)
 	if otherApps != nil {
-		apps := otherApps["apps"].([]any)
+		// cut first app because it is the same as the requested app
+		// and we need only other apps
+		apps := otherApps["apps"].([]any)[1:]
 		for _, app := range apps {
-			appInfo := app.(map[string]any)
-			packages = append(packages, appInfo["app_id"].(string))
+			appJson, err := json.Marshal(app)
+			if err != nil {
+				return nil, err
+			}
+			var appInfo AppNashStore
+			if err := json.Unmarshal(appJson, &appInfo); err != nil {
+				return nil, err
+			}
+			version := Version{
+				Name:        appInfo.Release.VersionName,
+				Code:        appInfo.Release.VersionCode,
+				Size:        appInfo.Size,
+				PackageName: appInfo.PackageName,
+				DeveloperId: appInfo.Id,
+				Link:        appInfo.Release.Link,
+			}
+			versions = append(versions, version)
 		}
 	}
 
-	return packages, nil
+	return versions, nil
 }
 
 func init() {

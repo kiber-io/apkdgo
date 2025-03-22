@@ -3,14 +3,14 @@ package main
 import (
 	"errors"
 	"fmt"
-	"io"
 	"os"
+	"os/signal"
 	"path/filepath"
 	"regexp"
 	"strconv"
 	"strings"
 	"sync"
-	"time"
+	"syscall"
 
 	_ "kiber-io/apkd/apkd/devices"
 	"kiber-io/apkd/apkd/sources"
@@ -18,11 +18,9 @@ import (
 	"slices"
 
 	"github.com/spf13/cobra"
-	"github.com/vbauerster/mpb/v8"
-	"github.com/vbauerster/mpb/v8/decor"
 )
 
-var packageNamesMap = make(map[string]int64)
+var packageNamesMap = make(map[string]int)
 var forceDownload bool
 var batchDeveloperDownloadMode bool
 var outputDir string
@@ -33,12 +31,6 @@ var packageNames []string
 var selectedSources []string
 var activeSources []sources.Source
 
-var pwg sync.WaitGroup
-var wg sync.WaitGroup
-var sourceLocks = make(map[string]*sync.Mutex)
-var sourceCounts = make(map[string]int)
-var mu sync.Mutex
-var progress = mpb.New(mpb.WithAutoRefresh(), mpb.WithWaitGroup(&pwg))
 var collectedErrors []string
 
 type QueuedVersion struct {
@@ -73,12 +65,12 @@ var rootCmd = cobra.Command{
 		}
 
 		for _, pkgName := range packageNames {
-			var versionCode int64
+			var versionCode int
 			if strings.Contains(pkgName, ":") {
 				parts := strings.Split(pkgName, ":")
 				pkgName = parts[0]
 				var err error
-				versionCode, err = strconv.ParseInt(parts[1], 10, 64)
+				versionCode, err = strconv.Atoi(parts[1])
 				if err != nil {
 					fmt.Printf("Error parsing version code for package %s: %v\n", pkgName, err)
 					os.Exit(1)
@@ -157,18 +149,34 @@ var rootCmd = cobra.Command{
 		}
 	},
 	Run: func(cmd *cobra.Command, args []string) {
-		processPackages(packageNamesMap, false)
+		sigChan := make(chan os.Signal, 1)
+		signal.Notify(sigChan, syscall.SIGINT, syscall.SIGTERM)
+		go func() {
+			<-sigChan
+			printCollectedErrors()
+			os.Exit(0)
+		}()
 
-		wg.Wait()
-		progress.Wait()
-
-		if len(collectedErrors) > 0 {
-			fmt.Println("\nErrors:")
-			for _, err := range collectedErrors {
-				fmt.Printf("- %s\n", err)
-			}
+		tq := NewTaskQueue(3)
+		for packageName, versionCode := range packageNamesMap {
+			tq.AddTask(PackageTask{
+				PackageName: packageName,
+				VersionCode: versionCode,
+			})
 		}
+
+		tq.Wait()
+		printCollectedErrors()
 	},
+}
+
+func printCollectedErrors() {
+	if len(collectedErrors) > 0 {
+		fmt.Println("\nErrors:")
+		for _, err := range collectedErrors {
+			fmt.Printf("- %s\n", strings.ReplaceAll(err, "\n", "\\n"))
+		}
+	}
 }
 
 func main() {
@@ -186,7 +194,32 @@ func main() {
 	}
 }
 
-func findVersion(packageName string, versionCode int64) (sources.Version, sources.Source, []sources.Error) {
+func sanitizeFileName(name string) string {
+	reg := regexp.MustCompile(`[<>:"/\\|?*]+`)
+	safe := reg.ReplaceAllString(name, "-")
+	safe = strings.TrimSpace(safe)
+	if len(safe) > 255 {
+		safe = safe[:255]
+	}
+
+	return safe
+}
+
+func sanitizedAndAbsoluteName(name string) (string, error, error) {
+	absPath, err := filepath.Abs(name)
+	if err != nil {
+		return "", err, nil
+	}
+	base := filepath.Base(absPath)
+	sanitizedName := sanitizeFileName(base)
+	absPath = filepath.Join(filepath.Dir(absPath), sanitizedName)
+	if base != sanitizedName {
+		return absPath, nil, fmt.Errorf("name %s is not valid. Using %s instead", base, sanitizedName)
+	}
+	return absPath, nil, nil
+}
+
+func findVersion(packageName string, versionCode int) (sources.Version, sources.Source, []sources.Error) {
 	var wg sync.WaitGroup
 	var mu sync.Mutex
 	var latestSource sources.Source
@@ -220,212 +253,4 @@ func findVersion(packageName string, versionCode int64) (sources.Version, source
 	wg.Wait()
 
 	return latestVersion, latestSource, sourcesErrors
-}
-
-func sanitizeFileName(name string) string {
-	reg := regexp.MustCompile(`[<>:"/\\|?*]+`)
-	safe := reg.ReplaceAllString(name, "-")
-	safe = strings.TrimSpace(safe)
-	if len(safe) > 255 {
-		safe = safe[:255]
-	}
-
-	return safe
-}
-
-func sanitizedAndAbsoluteName(name string) (string, error, error) {
-	absPath, err := filepath.Abs(name)
-	if err != nil {
-		return "", err, nil
-	}
-	base := filepath.Base(absPath)
-	sanitizedName := sanitizeFileName(base)
-	absPath = filepath.Join(filepath.Dir(absPath), sanitizedName)
-	if base != sanitizedName {
-		return absPath, nil, fmt.Errorf("name %s is not valid. Using %s instead", base, sanitizedName)
-	}
-	return absPath, nil, nil
-}
-
-func showErrorBar(progress *mpb.Progress, prevBar *mpb.Bar, pkgName string, errorText string) {
-	prevBar.Abort(false)
-	barError := progress.AddBar(1,
-		mpb.BarQueueAfter(prevBar),
-		mpb.PrependDecorators(
-			decor.Name(pkgName, decor.WC{C: decor.DSyncSpaceR}),
-			decor.Name(" ["+errorText+"]", decor.WC{C: decor.DSyncSpaceR}),
-		),
-	)
-	barError.IncrBy(1)
-}
-
-func processPackages(packageNamesMap map[string]int64, disableBatchDeveloperDownloadMode bool) {
-	for packageName, versionCode := range packageNamesMap {
-		wg.Add(1)
-		go func(pkgName string, versionCode int64) {
-			defer wg.Done()
-			errs := downloadPackage(pkgName, versionCode, disableBatchDeveloperDownloadMode)
-			collectedErrors = append(collectedErrors, errs...)
-		}(packageName, versionCode)
-	}
-}
-
-func downloadPackage(pkgName string, versionCode int64, disableBatchDeveloperDownloadMode bool) []string {
-	taskName := pkgName
-	if versionCode != 0 {
-		taskName = fmt.Sprintf("%s (%d)", pkgName, versionCode)
-	}
-	barSearch := progress.AddBar(1,
-		mpb.PrependDecorators(
-			decor.Name(taskName, decor.WC{C: decor.DSyncSpaceR}),
-			decor.Name(" [searching]", decor.WC{C: decor.DSyncSpaceR}),
-		),
-	)
-
-	version, source, errs := findVersion(pkgName, versionCode)
-	for _, err := range errs {
-		collectedErrors = append(collectedErrors, fmt.Sprintf("Source: %s, Package: %s, Error: %s", err.SourceName, err.PackageName, err.Err.Error()))
-	}
-	if version == (sources.Version{}) || source == nil {
-		var errorText string
-		if len(errs) > 0 {
-			errorText = "error"
-		} else {
-			errorText = "not found"
-		}
-		showErrorBar(progress, barSearch, taskName, errorText)
-		return collectedErrors
-	}
-
-	if !disableBatchDeveloperDownloadMode && batchDeveloperDownloadMode && version.DeveloperId != "" {
-		packages, err := source.FindByDeveloper(version.DeveloperId)
-		if err != nil {
-			collectedErrors = append(collectedErrors, fmt.Sprintf("Error finding versions by developer %s at source %s: %v", version.DeveloperId, source.Name(), err))
-			showErrorBar(progress, barSearch, taskName, "error")
-			return collectedErrors
-		}
-		var newPackages = make(map[string]int64)
-		for _, pkg := range packages {
-			if _, ok := packageNamesMap[pkg]; !ok {
-				newPackages[pkg] = 0
-			}
-		}
-		if len(newPackages) > 0 {
-			go processPackages(newPackages, true)
-		}
-	}
-	barWait := progress.AddBar(1,
-		mpb.BarQueueAfter(barSearch),
-		mpb.PrependDecorators(
-			decor.Name(pkgName, decor.WC{C: decor.DSyncSpaceR}),
-			decor.Name(fmt.Sprintf("v%s", version.Name), decor.WC{C: decor.DSyncSpaceR}),
-			decor.Name(fmt.Sprintf("(%s)", strconv.Itoa(int(version.Code))), decor.WC{C: decor.DSyncSpaceR}),
-			decor.Name(source.Name(), decor.WC{C: decor.DSyncSpaceR}),
-			decor.Name(" [queued]", decor.WC{C: decor.DSyncSpaceR}),
-		),
-	)
-	// workaround for hang bar: if call IncrBy(1) before BarQueueAfter, it will hang
-	barSearch.IncrBy(1)
-	bar := progress.AddBar(version.Size,
-		mpb.BarQueueAfter(barWait),
-		mpb.PrependDecorators(
-			decor.Name(pkgName, decor.WC{C: decor.DSyncSpaceR}),
-			decor.Name(fmt.Sprintf("v%s", version.Name), decor.WC{C: decor.DSyncSpaceR}),
-			decor.Name(fmt.Sprintf("(%s)", strconv.Itoa(int(version.Code))), decor.WC{C: decor.DSyncSpaceR}),
-			decor.Name(source.Name(), decor.WC{C: decor.DSyncSpaceR}),
-		),
-		mpb.AppendDecorators(
-			decor.Percentage(decor.WC{W: 5}),
-		),
-	)
-
-	mu.Lock()
-	if _, exists := sourceLocks[source.Name()]; !exists {
-		sourceLocks[source.Name()] = &sync.Mutex{}
-		sourceCounts[source.Name()] = 0
-	}
-	sourceLock := sourceLocks[source.Name()]
-	mu.Unlock()
-
-	for {
-		sourceLock.Lock()
-		if sourceCounts[source.Name()] < source.MaxParallelsDownloads() {
-			sourceCounts[source.Name()]++
-			sourceLock.Unlock()
-			break
-		}
-		sourceLock.Unlock()
-		// Wait before retrying
-		time.Sleep(100 * time.Millisecond)
-	}
-	barWait.IncrBy(1)
-
-	defer func() {
-		sourceLock.Lock()
-		sourceCounts[source.Name()]--
-		sourceLock.Unlock()
-	}()
-
-	var outFile string
-	if outputFileName != "" {
-		outFile = outputFileName
-	} else {
-		outFile = fmt.Sprintf("%s-%s-v%d.apk", pkgName, version.Name, version.Code)
-		outFile = sanitizeFileName(outFile)
-	}
-	if outputDir != "" {
-		outFile = fmt.Sprintf("%s/%s", outputDir, outFile)
-	}
-	if _, err := os.Stat(outFile); err == nil {
-		if !forceDownload {
-			collectedErrors = append(collectedErrors, fmt.Sprintf("File %s already exists. Use --force to overwrite.", outFile))
-			showErrorBar(progress, bar, pkgName, "error")
-			return collectedErrors
-		}
-		if err := os.Remove(outFile); err != nil {
-			collectedErrors = append(collectedErrors, fmt.Sprintf("Error removing existing file %s: %v", outFile, err))
-			showErrorBar(progress, bar, pkgName, "error")
-			return collectedErrors
-		}
-	}
-	reader, err := source.Download(version)
-	if err != nil {
-		collectedErrors = append(collectedErrors, fmt.Sprintf("Error downloading package %s from source %s: %v", pkgName, source.Name(), err))
-		showErrorBar(progress, bar, pkgName, "error")
-		return collectedErrors
-	}
-	progressReader := bar.ProxyReader(reader)
-	defer progressReader.Close()
-	file, err := os.Create(outFile)
-	if err != nil {
-		collectedErrors = append(collectedErrors, fmt.Sprintf("Error creating file %s: %v", outFile, err))
-		showErrorBar(progress, bar, pkgName, "error")
-		return collectedErrors
-	}
-	defer file.Close()
-
-	if _, err = io.Copy(file, progressReader); err != nil {
-		collectedErrors = append(collectedErrors, fmt.Sprintf("Error saving file %s: %v", outFile, err))
-		showErrorBar(progress, bar, pkgName, "error")
-		return collectedErrors
-	}
-
-	return collectedErrors
-}
-
-func removeElements(source, toRemove []string) []string {
-	// Создаем map для быстрого поиска элементов, которые нужно удалить
-	removeMap := make(map[string]struct{})
-	for _, item := range toRemove {
-		removeMap[item] = struct{}{}
-	}
-
-	// Отфильтровываем элементы
-	result := make([]string, 0, len(source))
-	for _, item := range source {
-		if _, found := removeMap[item]; !found {
-			result = append(result, item)
-		}
-	}
-	return result
 }

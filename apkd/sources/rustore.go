@@ -10,6 +10,7 @@ import (
 	mrand "math/rand"
 	"net/http"
 	"strconv"
+	"sync"
 )
 
 type RuStore struct {
@@ -181,7 +182,7 @@ func (s RuStore) getDownloadLink(appId float64) (string, error) {
 	return downloadUrl["url"].(string), nil
 }
 
-func (s RuStore) FindByPackage(packageName string, versionCode int64) (Version, error) {
+func (s RuStore) FindByPackage(packageName string, versionCode int) (Version, error) {
 	appInfo, err := s.getAppInfo(packageName)
 	if err != nil {
 		return Version{}, err
@@ -189,14 +190,14 @@ func (s RuStore) FindByPackage(packageName string, versionCode int64) (Version, 
 	size := appInfo["fileSize"].(float64)
 	versionName := appInfo["versionName"].(string)
 	versionCodeApi := appInfo["versionCode"].(float64)
-	if versionCode != 0 && versionCode != int64(versionCodeApi) {
+	if versionCode != 0 && versionCode != int(versionCodeApi) {
 		return Version{}, &AppNotFoundError{PackageName: packageName}
 	}
 	developerId := appInfo["publicCompanyId"].(string)
 	version := Version{
 		Name:        versionName,
-		Code:        int64(versionCodeApi),
-		Size:        int64(size),
+		Code:        int(versionCodeApi),
+		Size:        size,
 		PackageName: packageName,
 		DeveloperId: developerId,
 	}
@@ -207,7 +208,7 @@ func (s RuStore) MaxParallelsDownloads() int {
 	return 3
 }
 
-func (s RuStore) FindByDeveloper(developerId string) ([]string, error) {
+func (s RuStore) FindByDeveloper(developerId string) ([]Version, error) {
 	url := "https://backapi.rustore.ru/applicationData/devs/" + developerId + "/apps?limit=99999"
 	req, err := http.NewRequest("GET", url, nil)
 	if err != nil {
@@ -231,17 +232,48 @@ func (s RuStore) FindByDeveloper(developerId string) ([]string, error) {
 	if result["code"] != "OK" {
 		return nil, errors.New(result["message"].(string))
 	}
-	var versions []string
+	var versions []Version
+	// Use a buffered channel to limit the number of concurrent goroutines
+	sem := make(chan struct{}, 3)
+	errCh := make(chan error, 1)
+	var mu sync.Mutex
+
 	for _, app := range result["body"].(map[string]any)["elements"].([]any) {
 		appInfo := app.(map[string]any)
 		packageName := appInfo["packageName"].(string)
-		versions = append(versions, packageName)
+
+		sem <- struct{}{}
+		go func(packageName string) {
+			defer func() { <-sem }()
+			version, err := s.FindByPackage(packageName, 0)
+			if err != nil {
+				select {
+				case errCh <- err:
+				default:
+				}
+				return
+			}
+			mu.Lock()
+			versions = append(versions, version)
+			mu.Unlock()
+		}(packageName)
 	}
-	return versions, nil
+
+	for range cap(sem) {
+		sem <- struct{}{}
+	}
+
+	select {
+	case err := <-errCh:
+		return nil, err
+	default:
+		return versions, nil
+	}
 }
 
 func init() {
-	s := RuStore{}
-	s.appsCache = make(map[string]map[string]any)
+	s := RuStore{
+		appsCache: make(map[string]map[string]any),
+	}
 	Register(s)
 }
