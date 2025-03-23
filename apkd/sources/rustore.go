@@ -102,6 +102,12 @@ func (s RuStore) getAppInfo(packageName string) (map[string]any, error) {
 	if err != nil {
 		return nil, err
 	}
+	if res.StatusCode != http.StatusOK {
+		if res.StatusCode == http.StatusNotFound {
+			return nil, &AppNotFoundError{PackageName: packageName}
+		}
+		return nil, errors.New("failed to get app info (" + strconv.Itoa(res.StatusCode) + "): " + string(body))
+	}
 
 	var result map[string]any
 	if err := json.Unmarshal(body, &result); err != nil {
@@ -164,9 +170,14 @@ func (s RuStore) getDownloadLink(appId float64) (string, error) {
 
 	defer res.Body.Close()
 	body, err := readBody(res)
-
 	if err != nil {
 		return "", err
+	}
+	if res.StatusCode != http.StatusOK {
+		if res.StatusCode == http.StatusNotFound {
+			return "", &AppNotFoundError{PackageName: strconv.Itoa(int(appId))}
+		}
+		return "", errors.New("failed to get download link (" + strconv.Itoa(res.StatusCode) + "): " + string(body))
 	}
 	var result map[string]any
 	if err := json.Unmarshal(body, &result); err != nil {
@@ -197,9 +208,10 @@ func (s RuStore) FindByPackage(packageName string, versionCode int) (Version, er
 	version := Version{
 		Name:        versionName,
 		Code:        int(versionCodeApi),
-		Size:        size,
+		Size:        uint64(size),
 		PackageName: packageName,
 		DeveloperId: developerId,
+		Type:        APK,
 	}
 	return version, nil
 }
@@ -224,6 +236,12 @@ func (s RuStore) FindByDeveloper(developerId string) ([]Version, error) {
 	body, err := readBody(res)
 	if err != nil {
 		return nil, err
+	}
+	if res.StatusCode != http.StatusOK {
+		if res.StatusCode == http.StatusNotFound {
+			return nil, &AppNotFoundError{PackageName: developerId}
+		}
+		return nil, errors.New("failed to get developer apps (" + strconv.Itoa(res.StatusCode) + "): " + string(body))
 	}
 	var result map[string]any
 	if err := json.Unmarshal(body, &result); err != nil {

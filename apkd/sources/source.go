@@ -36,13 +36,21 @@ func (s BaseSource) FindByDeveloper(developerId string) ([]Version, error) {
 	return nil, nil
 }
 
+type FileType string
+
+const (
+	APK  FileType = "apk"
+	XAPK FileType = "xapk"
+)
+
 type Version struct {
 	Name        string
 	Code        int
-	Size        float64
+	Size        uint64
 	Link        string
 	PackageName string
 	DeveloperId string
+	Type        FileType
 }
 
 type ProgressReader struct {
@@ -83,20 +91,26 @@ func GetAll() map[string]Source {
 }
 
 func readBody(res *http.Response) ([]byte, error) {
-	var reader io.ReadCloser
-	var err error
+	reader, err := unpackResponse(res)
+	if err != nil {
+		return nil, err
+	}
+	defer reader.Close()
+	body, err := io.ReadAll(reader)
+	return body, err
+}
+
+func unpackResponse(res *http.Response) (io.ReadCloser, error) {
 	switch res.Header.Get("Content-Encoding") {
 	case "gzip":
-		reader, err = gzip.NewReader(res.Body)
+		gzipReader, err := gzip.NewReader(res.Body)
 		if err != nil {
 			return nil, err
 		}
-		defer reader.Close()
+		return gzipReader, nil
 	default:
-		reader = res.Body
+		return res.Body, nil
 	}
-	body, err := io.ReadAll(reader)
-	return body, err
 }
 
 func downloadFile(link string) (io.ReadCloser, error) {

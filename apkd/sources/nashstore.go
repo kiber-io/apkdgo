@@ -22,7 +22,7 @@ type AppNashStore struct {
 	PackageName string           `json:"app_id"`
 	Id          string           `json:"id"`
 	Release     ReleaseNashStore `json:"release"`
-	Size        float64
+	Size        uint64
 }
 
 type AppInfoNashStore struct {
@@ -146,7 +146,7 @@ func (s NashStore) getAppInfo(packageName string) (AppInfoNashStore, error) {
 				return appInfo, err
 			}
 			appInfo2 := list[0].(map[string]any)
-			appInfo.App.Size = appInfo2["size"].(float64)
+			appInfo.App.Size = uint64(appInfo2["size"].(float64))
 			return appInfo, nil
 		}
 	}
@@ -168,6 +168,7 @@ func (s NashStore) FindByPackage(packageName string, versionCode int) (Version, 
 	version.PackageName = appInfo.App.PackageName
 	version.DeveloperId = appInfo.App.Id
 	version.Link = appInfo.App.Release.Link
+	version.Type = APK
 
 	return version, nil
 }
@@ -181,7 +182,6 @@ func (s NashStore) MaxParallelsDownloads() int {
 }
 
 func (s NashStore) FindByDeveloper(developerId string) ([]Version, error) {
-	// for NashStore we use appId as developerId
 	url := "https://store.nashstore.ru/api/mobile/v1/application/" + developerId
 
 	req, err := http.NewRequest("GET", url, nil)
@@ -230,12 +230,12 @@ func (s NashStore) FindByDeveloper(developerId string) ([]Version, error) {
 	if err != nil {
 		return nil, err
 	}
+	if res.StatusCode != http.StatusOK {
+		return nil, fmt.Errorf("failed to get app info (" + res.Status + "): " + string(body))
+	}
 	var result map[string]any
 	if err := json.Unmarshal(body, &result); err != nil {
 		return nil, err
-	}
-	if res.StatusCode != http.StatusOK {
-		return nil, fmt.Errorf("failed to get app info (" + res.Status + "): " + string(body))
 	}
 	app := result["app"].(map[string]any)
 	if app == nil {
@@ -263,6 +263,7 @@ func (s NashStore) FindByDeveloper(developerId string) ([]Version, error) {
 				PackageName: appInfo.PackageName,
 				DeveloperId: appInfo.Id,
 				Link:        appInfo.Release.Link,
+				Type:        APK,
 			}
 			versions = append(versions, version)
 		}

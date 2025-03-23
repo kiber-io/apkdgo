@@ -14,8 +14,8 @@ type AppMetadata struct {
 }
 
 type VersionFile struct {
-	Name string  `json:"name"`
-	Size float64 `json:"size"`
+	Name string `json:"name"`
+	Size uint64 `json:"size"`
 }
 
 type VersionManifest struct {
@@ -80,120 +80,6 @@ func (s FDroid) getReader() (io.ReadCloser, error) {
 
 	return reader, nil
 }
-
-// func (s FDroid) getAppInfo(packageName string, versionCode int64) (Version, error) {
-// 	reader, err := s.getReader()
-// 	if err != nil {
-// 		return Version{}, err
-// 	}
-// 	defer reader.Close()
-// 	appInfo, err := s.findVersionInfo(reader, packageName)
-// 	if err != nil {
-// 		return Version{}, err
-// 	}
-// 	version := Version{
-// 		PackageName: appInfo.Metadata.AuthorName,
-// 	}
-// 	return version, err
-// 	// if err != nil {
-// 	// 	return nil, err
-// 	// }
-// 	// version := Version{
-// 	// 	Name:        versionName,
-// 	// 	Code:        versionCodeApi,
-// 	// 	Size:        size,
-// 	// 	PackageName: packageName,
-// 	// 	Link:        link,
-// 	// 	DeveloperId: authorName,
-// 	// }
-// 	// versionInfo, err := s.findNeededVersion(appInfo, versionCode)
-// 	// if err != nil {
-// 	// 	return nil, err
-// 	// }
-// 	// s.appsCache[packageName] = versionInfo
-
-// 	// return versionInfo, nil
-// }
-
-// func (s FDroid) findNeededVersion(appInfo map[string]any, versionCode int64) (map[string]any, error) {
-// 	versions, ok := appInfo["versions"].(map[string]any)
-// 	if !ok {
-// 		return nil, errors.New("invalid versions format")
-// 	}
-// 	metadata, ok := appInfo["metadata"].(map[string]any)
-// 	if !ok {
-// 		return nil, errors.New("invalid metadata format")
-// 	}
-// 	authorName, ok := metadata["authorName"].(string)
-// 	if !ok {
-// 		authorName = ""
-// 	}
-// 	var allVersions = make(map[int64]any)
-// 	var foundVersion map[string]any
-// 	var maxVersionCode int64
-// 	for _, version := range versions {
-// 		versionInfo, ok := version.(map[string]any)
-// 		if !ok {
-// 			continue
-// 		}
-// 		manifest, ok := versionInfo["manifest"].(map[string]any)
-// 		if !ok {
-// 			continue
-// 		}
-// 		versionCodeApi, ok := manifest["versionCode"].(float64)
-// 		if !ok {
-// 			continue
-// 		}
-// 		versionCodeApiInt := int64(versionCodeApi)
-// 		versionName, ok := manifest["versionName"].(string)
-// 		if !ok {
-// 			continue
-// 		}
-// 		file, ok := versionInfo["file"].(map[string]any)
-// 		if !ok {
-// 			continue
-// 		}
-// 		fileSize, ok := file["size"].(float64)
-// 		if !ok {
-// 			continue
-// 		}
-// 		link, ok := file["name"].(string)
-// 		if !ok {
-// 			continue
-// 		}
-// 		if versionCode != 0 {
-// 			if versionCode != versionCodeApiInt {
-// 				continue
-// 			}
-// 			foundVersion = map[string]any{
-// 				"versionName": versionName,
-// 				"versionCode": versionCodeApiInt,
-// 				"fileSize":    fileSize,
-// 				"link":        link,
-// 				"authorName":  authorName,
-// 			}
-// 			break
-// 		}
-// 		if versionCodeApiInt > maxVersionCode {
-// 			maxVersionCode = versionCodeApiInt
-// 		}
-// 		allVersions[versionCodeApiInt] = map[string]any{
-// 			"versionName": versionName,
-// 			"versionCode": versionCodeApiInt,
-// 			"fileSize":    fileSize,
-// 			"link":        link,
-// 			"authorName":  authorName,
-// 		}
-// 		break
-// 	}
-// 	if versionCode == 0 && maxVersionCode > 0 {
-// 		foundVersion = allVersions[maxVersionCode].(map[string]any)
-// 	}
-// 	if foundVersion == nil {
-// 		return nil, &AppNotFoundError{PackageName: appInfo["packageName"].(string)}
-// 	}
-// 	return foundVersion, nil
-// }
 
 func (s FDroid) getAppInfo(reader io.ReadCloser, packageName string) (AppInfo, error) {
 	decoder := json.NewDecoder(reader)
@@ -267,14 +153,6 @@ func (s FDroid) getAppInfo(reader io.ReadCloser, packageName string) (AppInfo, e
 	}
 	return appInfo, &AppNotFoundError{PackageName: packageName}
 }
-
-// func (s FDroid) parseAppFromJson(decoder *json.Decoder) (Version, error) {
-// 	var version Version
-// 	if err := decoder.Decode(&version); err != nil {
-// 		return Version{}, fmt.Errorf("error decoding app JSON: %w", err)
-// 	}
-// 	return version, nil
-// }
 
 func (s FDroid) findAllPackagesByAuthor(reader io.ReadCloser, authorName string) ([]AppInfo, error) {
 	decoder := json.NewDecoder(reader)

@@ -175,7 +175,12 @@ func (tq *TaskQueue) processVersionTask(task VersionTask) {
 	if outputFileName != "" {
 		outFile = outputFileName
 	} else {
-		outFile = fmt.Sprintf("%s-%s-v%d.apk", task.Version.PackageName, task.Version.Name, task.Version.Code)
+		if task.Version.Type == "" {
+			collectedErrors = append(collectedErrors, fmt.Sprintf("File type not found for package %s", task.Version.PackageName))
+			tq.showErrorBar(bar, task, "error")
+			return
+		}
+		outFile = fmt.Sprintf("%s-%s-v%d.%s", task.Version.PackageName, task.Version.Name, task.Version.Code, task.Version.Type)
 		outFile = sanitizeFileName(outFile)
 	}
 	if outputDir != "" {

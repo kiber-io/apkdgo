@@ -21,6 +21,8 @@ func (s *PropArray) UnmarshalText(text []byte) error {
 	return nil
 }
 
+var devices = []Device{}
+
 //go:embed configs/*.properties
 var configs embed.FS
 
@@ -56,8 +58,6 @@ func (s *Device) GenerateAndroidID() string {
 	}
 	return hex.EncodeToString(bytes)
 }
-
-var devices = []Device{}
 
 func GetRandomDevice() Device {
 	n, err := crand.Int(crand.Reader, big.NewInt(int64(len(devices))))
