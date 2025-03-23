@@ -33,11 +33,6 @@ var activeSources []sources.Source
 
 var collectedErrors []string
 
-type QueuedVersion struct {
-	Version sources.Version
-	Source  sources.Source
-}
-
 var rootCmd = cobra.Command{
 	Use:   "apkd",
 	Short: "apkd is a tool for downloading APKs from multiple sources",
