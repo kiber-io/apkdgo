@@ -221,6 +221,9 @@ func (tq *TaskQueue) processVersionTask(task VersionTask) {
 }
 
 func (tq *TaskQueue) showErrorBar(prevBar *mpb.Bar, task Task, errorText string) {
+	if prevBar.Aborted() {
+		return
+	}
 	barError := tq.progress.AddBar(1,
 		mpb.BarQueueAfter(prevBar),
 		mpb.PrependDecorators(getDecoratorsForTask(task, errorText)...),
