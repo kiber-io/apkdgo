@@ -111,7 +111,7 @@ func (s FDroid) getAppInfo(data map[string]any, packageName string) (AppInfo, er
 	var appInfo AppInfo
 	for pkgName := range data {
 		if strings.EqualFold(pkgName, packageName) {
-			jsonBytes, err := json.Marshal(data)
+			jsonBytes, err := json.Marshal(data[pkgName])
 			if err != nil {
 				panic(err)
 			}
@@ -123,138 +123,36 @@ func (s FDroid) getAppInfo(data map[string]any, packageName string) (AppInfo, er
 		}
 	}
 
-	// for decoder.More() {
-	// 	if foundPkg {
-	// 		break
-	// 	}
-	// 	token, err := decoder.Token()
-	// 	if err != nil {
-	// 		return appInfo, fmt.Errorf("error reading key: %w", err)
-	// 	}
-
-	// 	key, ok := token.(string)
-	// 	if !ok {
-	// 		return appInfo, fmt.Errorf("unexpected key format")
-	// 	}
-
-	// 	if key == "packages" {
-	// 		foundPackages = true
-	// 		if token, err := decoder.Token(); err != nil || token != json.Delim('{') {
-	// 			return appInfo, fmt.Errorf("invalid JSON format inside 'packages', expected '{'")
-	// 		}
-
-	// 		for decoder.More() {
-	// 			token, err := decoder.Token()
-	// 			if err != nil {
-	// 				return appInfo, fmt.Errorf("error reading package name: %w", err)
-	// 			}
-
-	// 			pkgName, ok := token.(string)
-	// 			if !ok {
-	// 				return appInfo, fmt.Errorf("unexpected package name format")
-	// 			}
-
-	// 			if strings.EqualFold(pkgName, packageName) {
-	// 				if err := decoder.Decode(&appInfo); err != nil {
-	// 					return appInfo, fmt.Errorf("error decoding package JSON: %w", err)
-	// 				}
-	// 				appInfo.PackageName = pkgName
-	// 				foundPkg = true
-	// 				break
-	// 			} else {
-	// 				var skip any
-	// 				if err := decoder.Decode(&skip); err != nil {
-	// 					return appInfo, fmt.Errorf("error skipping package JSON: %w", err)
-	// 				}
-	// 			}
-	// 		}
-	// 	} else {
-	// 		var skip any
-	// 		if err := decoder.Decode(&skip); err != nil {
-	// 			return appInfo, fmt.Errorf("error skipping non-packages JSON: %w", err)
-	// 		}
-	// 	}
-	// }
-
-	// if !foundPackages {
-	// 	return appInfo, fmt.Errorf("no 'packages' object found in JSON")
-	// }
-	// if foundPkg {
-	// 	return appInfo, nil
-	// }
 	return appInfo, &AppNotFoundError{PackageName: packageName}
 }
 
-// func (s FDroid) findAllPackagesByAuthor(data map[string]any, authorName string) ([]AppInfo, error) {
-// 	var appsInfo []AppInfo
+func (s FDroid) findAllPackagesByAuthor(data map[string]any, authorName string) ([]AppInfo, error) {
+	var appsInfo []AppInfo
 
-// 	packages, ok := data["packages"].(map[string]any)
-// 	if !ok {
-// 		return appsInfo, fmt.Errorf("invalid JSON format, expected 'packages' object")
-// 	}
-// 	for pkgName := range packages {
-// 		if strings.EqualFold(pkgName, packageName) {
-// 			jsonBytes, err := json.Marshal(data)
-// 			if err != nil {
-// 				panic(err)
-// 			}
-// 			if err := json.Unmarshal(jsonBytes, &appInfo); err != nil {
-// 				return appInfo, fmt.Errorf("error decoding package JSON: %w", err)
-// 			}
-// 			appInfo.PackageName = pkgName
-// 			return appInfo, nil
-// 		}
-// 	}
+	for pkgName := range data {
+		if metadata, ok := data[pkgName].(map[string]any)["metadata"].(map[string]any); ok {
+			if author, ok := metadata["authorName"].(string); ok && author == authorName {
+				jsonBytes, err := json.Marshal(data[pkgName])
+				if err != nil {
+					panic(err)
+				}
+				var appInfo AppInfo
+				if err := json.Unmarshal(jsonBytes, &appInfo); err != nil {
+					return nil, fmt.Errorf("error decoding package JSON: %w", err)
+				}
+				appInfo.PackageName = pkgName
+				appsInfo = append(appsInfo, appInfo)
+			}
+		}
+	}
 
-// 	for decoder.More() {
-// 		token, err := decoder.Token()
-// 		if err != nil {
-// 			return nil, fmt.Errorf("error reading key: %w", err)
-// 		}
-
-// 		key, ok := token.(string)
-// 		if !ok {
-// 			return nil, fmt.Errorf("unexpected key format")
-// 		}
-
-// 		if key == "packages" {
-// 			if token, err := decoder.Token(); err != nil || token != json.Delim('{') {
-// 				return nil, fmt.Errorf("invalid JSON format inside 'packages', expected '{'")
-// 			}
-
-// 			for decoder.More() {
-// 				token, err := decoder.Token()
-// 				if err != nil {
-// 					return nil, fmt.Errorf("error reading key: %w", err)
-// 				}
-
-// 				packageName, ok := token.(string)
-// 				if !ok {
-// 					return nil, fmt.Errorf("unexpected package name format")
-// 				}
-
-// 				var appInfo AppInfo
-// 				if err := decoder.Decode(&appInfo); err != nil {
-// 					return nil, fmt.Errorf("error decoding package JSON: %w", err)
-// 				}
-// 				appInfo.PackageName = packageName
-// 				if strings.EqualFold(appInfo.Metadata.AuthorName, authorName) {
-// 					appsInfo = append(appsInfo, appInfo)
-// 				}
-// 			}
-// 		} else {
-// 			var skip any
-// 			if err := decoder.Decode(&skip); err != nil {
-// 				return nil, fmt.Errorf("error skipping non-packages JSON: %w", err)
-// 			}
-// 		}
-// 	}
-
-// 	return appsInfo, nil
-// }
+	return appsInfo, nil
+}
 
 func (s FDroid) findNeededVersion(appInfo AppInfo, versionCode int) (Version, error) {
-	var version Version
+	version := Version{
+		Type: APK,
+	}
 	var err error
 
 	if versionCode != 0 {
@@ -310,22 +208,22 @@ func (s FDroid) FindByPackage(packageName string, versionCode int) (Version, err
 	return s.findNeededVersion(appInfo, versionCode)
 }
 
-// func (s FDroid) FindByDeveloper(developerId string) ([]string, error) {
-// 	var packages []string
-// 	var err error
-// 	data, err := s.getJson()
-// 	if err != nil {
-// 		return packages, err
-// 	}
-// 	appsInfo, err := s.findAllPackagesByAuthor(data, developerId)
-// 	if err != nil {
-// 		return packages, err
-// 	}
-// 	for _, appInfo := range appsInfo {
-// 		packages = append(packages, appInfo.PackageName)
-// 	}
-// 	return packages, nil
-// }
+func (s FDroid) FindByDeveloper(developerId string) ([]string, error) {
+	var packages []string
+	var err error
+	data, err := s.getJson()
+	if err != nil {
+		return packages, err
+	}
+	appsInfo, err := s.findAllPackagesByAuthor(data, developerId)
+	if err != nil {
+		return packages, err
+	}
+	for _, appInfo := range appsInfo {
+		packages = append(packages, appInfo.PackageName)
+	}
+	return packages, nil
+}
 
 func init() {
 	s := FDroid{}
