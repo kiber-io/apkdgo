@@ -13,12 +13,15 @@ import (
 	"github.com/vbauerster/mpb/v8/decor"
 )
 
+var processedDevelopers = make(map[string][]string)
+
 type Task any
 
 type PackageTask struct {
 	Task
 	PackageName string
 	VersionCode int
+	Bar         *mpb.Bar
 }
 
 type VersionTask struct {
@@ -105,11 +108,18 @@ func getDecoratorsForTask(task Task, status string) []decor.Decorator {
 }
 
 func (tq *TaskQueue) processPackageTask(task PackageTask) {
-	barSearch := tq.progress.AddBar(1,
+	bar := tq.progress.AddBar(1,
+		mpb.BarQueueAfter(task.Bar),
 		mpb.PrependDecorators(getDecoratorsForTask(task, "search")...),
 	)
-	p := 1000 + barSearch.ID()
-	barSearch.SetPriority(p)
+	if task.Bar != nil {
+		p := task.Bar.ID() + 3000
+		task.Bar.SetPriority(p)
+		task.Bar.Abort(true)
+	} else {
+		p := 3000 - bar.ID()
+		bar.SetPriority(p)
+	}
 	version, source, errs := findVersion(task.PackageName, task.VersionCode)
 	for _, err := range errs {
 		collectedErrors = append(collectedErrors, fmt.Sprintf("Source: %s, Package: %s, Error: %s", err.SourceName, err.PackageName, err.Err.Error()))
@@ -121,33 +131,43 @@ func (tq *TaskQueue) processPackageTask(task PackageTask) {
 		} else {
 			errorText = "not found"
 		}
-		tq.showErrorBar(barSearch, task, errorText)
+		tq.showErrorBar(bar, task, errorText)
 		return
 	}
-	tq.AddTask(VersionTask{
-		Version: version,
-		Source:  source,
-		Bar:     barSearch,
-	})
-
+	var wg2 sync.WaitGroup
+	wg2.Add(1)
+	go func() {
+		defer wg2.Done()
+		tq.processVersionTask(VersionTask{
+			Version: version,
+			Source:  source,
+			Bar:     bar,
+		})
+	}()
+	defer wg2.Wait()
 	if batchDeveloperDownloadMode && version.DeveloperId != "" {
-		versions, err := source.FindByDeveloper(version.DeveloperId)
+		if _, ok := processedDevelopers[version.DeveloperId]; ok {
+			if slices.Contains(processedDevelopers[version.DeveloperId], source.Name()) {
+				return
+			}
+		}
+		processedDevelopers[version.DeveloperId] = append(processedDevelopers[version.DeveloperId], source.Name())
+		packages, err := source.FindByDeveloper(version.DeveloperId)
 		if err != nil {
-			collectedErrors = append(collectedErrors, fmt.Sprintf("Error finding versions by developer %s at source %s: %v", version.DeveloperId, source.Name(), err))
-			tq.showErrorBar(barSearch, task, "error")
+			collectedErrors = append(collectedErrors, fmt.Sprintf("Error finding packages by developer %s at source %s: %v", version.DeveloperId, source.Name(), err))
+			tq.showErrorBar(bar, task, "error")
 			return
 		}
-		for _, version := range versions {
-			if !slices.Contains(tq.processedPackages, version.PackageName) {
-				newTask := VersionTask{
-					Version: version,
-					Source:  source,
+		for _, packageName := range packages {
+			if !slices.Contains(tq.processedPackages, packageName) {
+				newTask := PackageTask{
+					PackageName: packageName,
 				}
 				bar := tq.progress.AddBar(1,
 					mpb.PrependDecorators(getDecoratorsForTask(newTask, "queued")...),
 				)
 				newTask.Bar = bar
-				p := 2000 + bar.ID()
+				p := 5000 + bar.ID()
 				bar.SetPriority(p)
 				tq.AddTask(newTask)
 			}
@@ -161,6 +181,8 @@ func (tq *TaskQueue) processVersionTask(task VersionTask) {
 		mpb.PrependDecorators(getDecoratorsForTask(task, "")...),
 		mpb.AppendDecorators(
 			decor.Percentage(decor.WC{W: 5}),
+			decor.Name(" / "),
+			decor.EwmaSpeed(decor.SizeB1024(0), "% .2f", 30),
 		),
 	)
 	if task.Bar != nil {

@@ -15,7 +15,7 @@ type Source interface {
 	MaxParallelsDownloads() int
 	Name() string
 	FindByPackage(packageName string, versionCode int) (Version, error)
-	FindByDeveloper(developerId string) ([]Version, error)
+	FindByDeveloper(developerId string) ([]string, error)
 	Download(version Version) (io.ReadCloser, error)
 }
 
@@ -32,8 +32,8 @@ func (s BaseSource) MaxParallelsDownloads() int {
 	return 1
 }
 
-func (s BaseSource) FindByDeveloper(developerId string) ([]Version, error) {
-	return nil, nil
+func (s BaseSource) FindByDeveloper(developerId string) ([]string, error) {
+	return []string{}, nil
 }
 
 type FileType string

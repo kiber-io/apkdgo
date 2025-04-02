@@ -10,7 +10,6 @@ import (
 	mrand "math/rand"
 	"net/http"
 	"strconv"
-	"sync"
 )
 
 type RuStore struct {
@@ -220,8 +219,8 @@ func (s RuStore) MaxParallelsDownloads() int {
 	return 3
 }
 
-func (s RuStore) FindByDeveloper(developerId string) ([]Version, error) {
-	url := "https://backapi.rustore.ru/applicationData/devs/" + developerId + "/apps?limit=99999"
+func (s RuStore) FindByDeveloper(developerId string) ([]string, error) {
+	url := "https://backapi.rustore.ru/applicationData/devs/" + developerId + "/apps?limit=1000"
 	req, err := http.NewRequest("GET", url, nil)
 	if err != nil {
 		return nil, err
@@ -250,43 +249,16 @@ func (s RuStore) FindByDeveloper(developerId string) ([]Version, error) {
 	if result["code"] != "OK" {
 		return nil, errors.New(result["message"].(string))
 	}
-	var versions []Version
-	// Use a buffered channel to limit the number of concurrent goroutines
-	sem := make(chan struct{}, 3)
-	errCh := make(chan error, 1)
-	var mu sync.Mutex
-
+	var packages []string
 	for _, app := range result["body"].(map[string]any)["elements"].([]any) {
 		appInfo := app.(map[string]any)
-		packageName := appInfo["packageName"].(string)
-
-		sem <- struct{}{}
-		go func(packageName string) {
-			defer func() { <-sem }()
-			version, err := s.FindByPackage(packageName, 0)
-			if err != nil {
-				select {
-				case errCh <- err:
-				default:
-				}
-				return
-			}
-			mu.Lock()
-			versions = append(versions, version)
-			mu.Unlock()
-		}(packageName)
+		packageName, exist := appInfo["packageName"]
+		if !exist {
+			return nil, errors.New("packageName not found in app info")
+		}
+		packages = append(packages, packageName.(string))
 	}
-
-	for range cap(sem) {
-		sem <- struct{}{}
-	}
-
-	select {
-	case err := <-errCh:
-		return nil, err
-	default:
-		return versions, nil
-	}
+	return packages, nil
 }
 
 func init() {

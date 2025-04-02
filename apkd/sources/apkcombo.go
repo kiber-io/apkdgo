@@ -5,6 +5,7 @@ import (
 	"io"
 	"net/http"
 	neturl "net/url"
+	"path"
 	"strconv"
 	"strings"
 
@@ -25,17 +26,7 @@ func (s ApkCombo) Download(version Version) (io.ReadCloser, error) {
 	return downloadFile(version.Link)
 }
 
-func (s ApkCombo) FindByPackage(packageName string, versionCode int) (Version, error) {
-	var version Version
-
-	url := "https://apkcombo.com/search?q=" + packageName
-
-	req, err := http.NewRequest("GET", url, nil)
-
-	if err != nil {
-		return version, err
-	}
-
+func (s ApkCombo) addHeaders(req *http.Request) {
 	req.Header.Add("User-Agent", browsers.GetRandomUserAgent())
 	req.Header.Add("Accept", "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8")
 	req.Header.Add("Accept-Encoding", "gzip")
@@ -48,6 +39,19 @@ func (s ApkCombo) FindByPackage(packageName string, versionCode int) (Version, e
 	req.Header.Add("sec-fetch-user", "?1")
 	req.Header.Add("priority", "u=0, i")
 	req.Header.Add("te", "trailers")
+}
+
+func (s ApkCombo) FindByPackage(packageName string, versionCode int) (Version, error) {
+	var version Version
+
+	url := "https://apkcombo.com/search?q=" + packageName
+
+	req, err := http.NewRequest("GET", url, nil)
+
+	if err != nil {
+		return version, err
+	}
+	s.addHeaders(req)
 
 	res, err := http.DefaultClient.Do(req)
 	if err != nil {
@@ -62,6 +66,52 @@ func (s ApkCombo) FindByPackage(packageName string, versionCode int) (Version, e
 	doc, err := goquery.NewDocumentFromReader(reader)
 	if err != nil {
 		return version, err
+	}
+
+	// check that opened search page instead of app page
+	downloadIcon := doc.Find("#icon-arrow-download")
+	if downloadIcon.Length() == 0 {
+		// maybe we opened search page instead of app page, try to check the first link
+		contentBlock := doc.Find(".content")
+		if contentBlock.Length() == 0 {
+			return version, &AppNotFoundError{PackageName: packageName}
+		}
+		firstLinkBlock := contentBlock.Find(".l_item").First()
+		if firstLinkBlock.Length() == 0 {
+			return version, &AppNotFoundError{PackageName: packageName}
+		}
+		link, exists := firstLinkBlock.Attr("href")
+		if !exists {
+			return version, &AppNotFoundError{PackageName: packageName}
+		}
+		link, err = neturl.JoinPath("https://apkcombo.com", link)
+		if err != nil {
+			return version, err
+		}
+		lastPart := path.Base(link)
+		if !strings.EqualFold(lastPart, packageName) {
+			return version, &AppNotFoundError{PackageName: packageName}
+		}
+		packageName = lastPart
+		req, err = http.NewRequest("GET", link, nil)
+		if err != nil {
+			return version, err
+		}
+		s.addHeaders(req)
+		res, err = http.DefaultClient.Do(req)
+		if err != nil {
+			return version, err
+		}
+		defer res.Body.Close()
+		reader, err := unpackResponse(res)
+		if err != nil {
+			return version, err
+		}
+		defer reader.Close()
+		doc, err = goquery.NewDocumentFromReader(reader)
+		if err != nil {
+			return version, err
+		}
 	}
 
 	authorBlock := doc.Find(".author .is-link")
@@ -201,6 +251,63 @@ func (s ApkCombo) FindByPackage(packageName string, versionCode int) (Version, e
 	}
 
 	return version, nil
+}
+
+func (s ApkCombo) FindByDeveloper(developerId string) ([]string, error) {
+	var packages []string
+
+	url := "https://apkcombo.com/developer/" + developerId
+	req, err := http.NewRequest("GET", url, nil)
+	if err != nil {
+		return packages, err
+	}
+	req.Header.Add("User-Agent", browsers.GetRandomUserAgent())
+	req.Header.Add("Accept", "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8")
+	req.Header.Add("Accept-Encoding", "gzip")
+	req.Header.Add("accept-language", "en-US")
+	req.Header.Add("dnt", "1")
+	req.Header.Add("upgrade-insecure-requests", "1")
+	req.Header.Add("sec-fetch-dest", "document")
+	req.Header.Add("sec-fetch-mode", "navigate")
+	req.Header.Add("sec-fetch-site", "same-origin")
+	req.Header.Add("sec-fetch-user", "?1")
+	req.Header.Add("priority", "u=0, i")
+	req.Header.Add("te", "trailers")
+	res, err := http.DefaultClient.Do(req)
+	if err != nil {
+		return packages, err
+	}
+	defer res.Body.Close()
+	reader, err := unpackResponse(res)
+	if err != nil {
+		return packages, err
+	}
+	defer reader.Close()
+	doc, err := goquery.NewDocumentFromReader(reader)
+	if err != nil {
+		return packages, err
+	}
+
+	doc.Find(".l_item").EachWithBreak(func(i int, e *goquery.Selection) bool {
+		link, exists := e.Attr("href")
+		if !exists {
+			err = fmt.Errorf("link attribute not found")
+			return false
+		}
+		link, err = neturl.JoinPath("https://apkcombo.com", link)
+		if err != nil {
+			err = fmt.Errorf("failed to join path: %v", err)
+			return false
+		}
+		packageName := path.Base(link)
+		packages = append(packages, packageName)
+		return true
+	})
+	if err != nil {
+		packages = nil
+	}
+
+	return packages, err
 }
 
 func init() {

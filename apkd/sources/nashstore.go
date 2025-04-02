@@ -181,7 +181,7 @@ func (s NashStore) MaxParallelsDownloads() int {
 	return 3
 }
 
-func (s NashStore) FindByDeveloper(developerId string) ([]Version, error) {
+func (s NashStore) FindByDeveloper(developerId string) ([]string, error) {
 	url := "https://store.nashstore.ru/api/mobile/v1/application/" + developerId
 
 	req, err := http.NewRequest("GET", url, nil)
@@ -241,7 +241,7 @@ func (s NashStore) FindByDeveloper(developerId string) ([]Version, error) {
 	if app == nil {
 		return nil, fmt.Errorf("app not found")
 	}
-	var versions []Version
+	var packages []string
 	otherApps := app["other_apps"].(map[string]any)
 	if otherApps != nil {
 		// cut first app because it is the same as the requested app
@@ -256,20 +256,11 @@ func (s NashStore) FindByDeveloper(developerId string) ([]Version, error) {
 			if err := json.Unmarshal(appJson, &appInfo); err != nil {
 				return nil, err
 			}
-			version := Version{
-				Name:        appInfo.Release.VersionName,
-				Code:        appInfo.Release.VersionCode,
-				Size:        appInfo.Size,
-				PackageName: appInfo.PackageName,
-				DeveloperId: appInfo.Id,
-				Link:        appInfo.Release.Link,
-				Type:        APK,
-			}
-			versions = append(versions, version)
+			packages = append(packages, appInfo.PackageName)
 		}
 	}
 
-	return versions, nil
+	return packages, nil
 }
 
 func init() {
