@@ -23,7 +23,12 @@ func (s ApkCombo) Name() string {
 	return "apkcombo"
 }
 func (s ApkCombo) Download(version Version) (io.ReadCloser, error) {
-	return downloadFile(version.Link)
+	req, err := http.NewRequest("GET", version.Link, nil)
+	if err != nil {
+		return nil, err
+	}
+	s.addHeaders(req)
+	return createResponseReader(req)
 }
 
 func (s ApkCombo) addHeaders(req *http.Request) {

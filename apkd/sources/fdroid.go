@@ -46,7 +46,14 @@ func (s FDroid) Name() string {
 }
 
 func (s FDroid) Download(version Version) (io.ReadCloser, error) {
-	return downloadFile("https://f-droid.org/repo" + version.Link)
+	req, err := http.NewRequest("GET", "https://f-droid.org/repo"+version.Link, nil)
+	if err != nil {
+		return nil, err
+	}
+	req.Header.Add("User-Agent", "F-Droid 1.21.1")
+	req.Header.Add("Accept-Encoding", "gzip")
+	req.Header.Add("accept-charset", "UTF-8")
+	return createResponseReader(req)
 }
 
 func (s FDroid) getJson() (map[string]any, error) {

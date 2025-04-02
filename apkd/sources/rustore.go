@@ -31,7 +31,12 @@ func (s RuStore) Download(version Version) (io.ReadCloser, error) {
 	if err != nil {
 		return nil, err
 	}
-	return downloadFile(downloadLink)
+	req, err := http.NewRequest("GET", downloadLink, nil)
+	if err != nil {
+		return nil, err
+	}
+	s.addHeaders(req)
+	return createResponseReader(req)
 }
 
 func (s RuStore) generateDeviceId() string {
@@ -66,17 +71,7 @@ func (s RuStore) generateDeviceId() string {
 	return string(b1) + "--" + string(b2)
 }
 
-func (s RuStore) getAppInfo(packageName string) (map[string]any, error) {
-	if appInfo, ok := s.appsCache[packageName]; ok {
-		return appInfo, nil
-	}
-	// If the app info is not in the cache, fetch it from the API
-	// and store it in the cache
-	url := "https://backapi.rustore.ru/applicationData/overallInfo/" + packageName
-	req, err := http.NewRequest("GET", url, nil)
-	if err != nil {
-		return nil, err
-	}
+func (s RuStore) addHeaders(req *http.Request) {
 	device := devices.GetRandomDevice()
 	req.Header.Add("User-Agent", "RuStore/1.61.0.2 (Android "+device.BuildVersionRelease+"; SDK "+strconv.Itoa(device.BuildVersionSdkInt)+"; "+device.Platforms[0]+"; "+device.BuildModel+"; en)")
 	req.Header.Add("Connection", "Keep-Alive")
@@ -90,6 +85,21 @@ func (s RuStore) getAppInfo(packageName string) (map[string]any, error) {
 	req.Header.Add("firmwareVer", device.BuildVersionRelease)
 	req.Header.Add("deviceType", "mobile")
 	req.Header.Add("ruStoreVerCode", "1061002")
+}
+
+func (s RuStore) getAppInfo(packageName string) (map[string]any, error) {
+	if appInfo, ok := s.appsCache[packageName]; ok {
+		return appInfo, nil
+	}
+	// If the app info is not in the cache, fetch it from the API
+	// and store it in the cache
+	url := "https://backapi.rustore.ru/applicationData/overallInfo/" + packageName
+	req, err := http.NewRequest("GET", url, nil)
+	if err != nil {
+		return nil, err
+	}
+	s.addHeaders(req)
+
 	res, err := http.DefaultClient.Do(req)
 
 	if err != nil {

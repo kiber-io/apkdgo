@@ -173,22 +173,7 @@ func (s NashStore) FindByPackage(packageName string, versionCode int) (Version, 
 	return version, nil
 }
 
-func (s NashStore) Download(version Version) (io.ReadCloser, error) {
-	return downloadFile(version.Link)
-}
-
-func (s NashStore) MaxParallelsDownloads() int {
-	return 3
-}
-
-func (s NashStore) FindByDeveloper(developerId string) ([]string, error) {
-	url := "https://store.nashstore.ru/api/mobile/v1/application/" + developerId
-
-	req, err := http.NewRequest("GET", url, nil)
-
-	if err != nil {
-		return nil, err
-	}
+func (s NashStore) addHeaders(req *http.Request) error {
 	device := devices.GetRandomDevice()
 	caser := cases.Title(language.English)
 	deviceBrand := caser.String(device.BuildBrand)
@@ -214,10 +199,38 @@ func (s NashStore) FindByDeveloper(developerId string) ([]string, error) {
 	}
 	appHeaderBytes, err := json.Marshal(appHeader)
 	if err != nil {
+		return err
+	}
+	req.Header.Add("nashstore-app", string(appHeaderBytes))
+	return nil
+}
+
+func (s NashStore) Download(version Version) (io.ReadCloser, error) {
+	req, err := http.NewRequest("GET", version.Link, nil)
+	if err != nil {
 		return nil, err
 	}
+	if err := s.addHeaders(req); err != nil {
+		return nil, err
+	}
+	return createResponseReader(req)
+}
 
-	req.Header.Add("nashstore-app", string(appHeaderBytes))
+func (s NashStore) MaxParallelsDownloads() int {
+	return 3
+}
+
+func (s NashStore) FindByDeveloper(developerId string) ([]string, error) {
+	url := "https://store.nashstore.ru/api/mobile/v1/application/" + developerId
+
+	req, err := http.NewRequest("GET", url, nil)
+
+	if err != nil {
+		return nil, err
+	}
+	if err := s.addHeaders(req); err != nil {
+		return nil, err
+	}
 
 	res, err := http.DefaultClient.Do(req)
 

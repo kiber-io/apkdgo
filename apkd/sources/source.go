@@ -113,10 +113,13 @@ func unpackResponse(res *http.Response) (io.ReadCloser, error) {
 	}
 }
 
-func downloadFile(link string) (io.ReadCloser, error) {
-	resp, err := http.Get(link)
+func createResponseReader(req *http.Request) (io.ReadCloser, error) {
+	resp, err := http.DefaultClient.Do(req)
 	if err != nil {
 		return nil, err
+	}
+	if resp.StatusCode != http.StatusOK {
+		return nil, fmt.Errorf("error: %s", resp.Status)
 	}
 	return resp.Body, nil
 }
