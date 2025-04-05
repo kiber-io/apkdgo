@@ -5,11 +5,12 @@ import (
 	"context"
 	"fmt"
 	"io"
-	"kiber-io/apkd/apkd/logger"
 	"net/http"
 	"os"
 	"strings"
 	"time"
+
+	"github.com/kiber-io/apkd/apkd/logger"
 
 	"github.com/vbauerster/mpb/v8"
 )

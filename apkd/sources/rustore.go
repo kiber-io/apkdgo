@@ -6,10 +6,11 @@ import (
 	"encoding/json"
 	"errors"
 	"io"
-	"kiber-io/apkd/apkd/devices"
 	mrand "math/rand"
 	"net/http"
 	"strconv"
+
+	"github.com/kiber-io/apkd/apkd/devices"
 )
 
 type RuStore struct {

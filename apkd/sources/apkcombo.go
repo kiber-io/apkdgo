@@ -9,7 +9,7 @@ import (
 	"strconv"
 	"strings"
 
-	"kiber-io/apkd/apkd/browsers"
+	"github.com/kiber-io/apkd/apkd/browsers"
 
 	"github.com/PuerkitoBio/goquery"
 	"github.com/dustin/go-humanize"

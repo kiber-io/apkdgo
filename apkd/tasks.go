@@ -4,13 +4,14 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"kiber-io/apkd/apkd/logger"
-	"kiber-io/apkd/apkd/sources"
 	"log"
 	"os"
 	"path/filepath"
 	"slices"
 	"sync"
+
+	"github.com/kiber-io/apkd/apkd/logger"
+	"github.com/kiber-io/apkd/apkd/sources"
 
 	"github.com/vbauerster/mpb/v8"
 	"github.com/vbauerster/mpb/v8/decor"
