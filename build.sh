@@ -17,7 +17,7 @@ build() {
 
     echo "Building for $os $arch..."
 
-    GOOS=$os GOARCH=$arch go build -o "$OUTPUT_DIR/$output_name" -ldflags "-X 'main.version=$VERSION' -X 'main.commit=$COMMIT' -X 'main.buildDate=$BUILD_DATE'" ./apkd
+    GOOS=$os GOARCH=$arch CGO_ENABLED=0 go build -o "$OUTPUT_DIR/$output_name" -ldflags "-s -w -X 'main.version=$VERSION' -X 'main.commit=$COMMIT' -X 'main.buildDate=$BUILD_DATE'" ./apkd
 
     if [ $? -eq 0 ]; then
         echo "Successfully built $output_name"
@@ -27,6 +27,12 @@ build() {
 }
 
 build "windows" "amd64" "apkd-$VERSION-windows-amd64.exe"
+build "windows" "386" "apkd-$VERSION-windows-386.exe"
 build "linux" "amd64" "apkd-$VERSION-linux-amd64"
+build "linux" "arm64" "apkd-$VERSION-linux-arm64"
+build "linux" "386" "apkd-$VERSION-linux-386"
+build "darwin" "amd64" "apkd-$VERSION-darwin-amd64"
+build "darwin" "arm64" "apkd-$VERSION-darwin-arm64"
+
 
 echo "Build process completed."

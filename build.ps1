@@ -21,7 +21,8 @@ function Build {
 
     $env:GOOS = $os
     $env:GOARCH = $arch
-    & go build -o "$OUTPUT_DIR\$output_name" -ldflags "-X 'main.version=$version' -X 'main.commit=$commit' -X 'main.buildDate=$buildDate'" ./apkd/
+    $env:CGO_ENABLED = 0
+    & go build -o "$OUTPUT_DIR\$output_name" -ldflags "-s -w -X 'main.version=$version' -X 'main.commit=$commit' -X 'main.buildDate=$buildDate'" ./apkd/
 
     if ($?) {
         Write-Output "Successfully built $output_name"
@@ -31,6 +32,11 @@ function Build {
 }
 
 Build "windows" "amd64" "apkd-$version-windows-amd64.exe"
+Build "windows" "386" "apkd-$version-windows-386.exe"
 Build "linux" "amd64" "apkd-$version-linux-amd64"
+Build "linux" "arm64" "apkd-$version-linux-arm64"
+Build "linux" "386" "apkd-$version-linux-386"
+Build "darwin" "amd64" "apkd-$version-darwin-amd64"
+Build "darwin" "arm64" "apkd-$version-darwin-arm64"
 
 Write-Output "Build process completed."
