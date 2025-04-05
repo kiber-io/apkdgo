@@ -41,12 +41,12 @@ type FDroid struct {
 	jsonCache map[string]any
 }
 
-func (s FDroid) Name() string {
+func (s *FDroid) Name() string {
 	return "fdroid"
 }
 
-func (s FDroid) Download(version Version) (io.ReadCloser, error) {
-	req, err := http.NewRequest("GET", "https://f-droid.org/repo"+version.Link, nil)
+func (s *FDroid) Download(version Version) (io.ReadCloser, error) {
+	req, err := s.NewRequest("GET", "https://f-droid.org/repo"+version.Link, nil)
 	if err != nil {
 		return nil, err
 	}
@@ -56,13 +56,13 @@ func (s FDroid) Download(version Version) (io.ReadCloser, error) {
 	return createResponseReader(req)
 }
 
-func (s FDroid) getJson() (map[string]any, error) {
+func (s *FDroid) getJson() (map[string]any, error) {
 	if s.jsonCache != nil {
 		return s.jsonCache, nil
 	}
 	url := "https://f-droid.org/repo/index-v2.json"
 
-	req, err := http.NewRequest("GET", url, nil)
+	req, err := s.NewRequest("GET", url, nil)
 
 	if err != nil {
 		return nil, err
@@ -107,7 +107,7 @@ func (s FDroid) getJson() (map[string]any, error) {
 	return packages, nil
 }
 
-func (s FDroid) getAppInfo(data map[string]any, packageName string) (AppInfo, error) {
+func (s *FDroid) getAppInfo(data map[string]any, packageName string) (AppInfo, error) {
 	var appInfo AppInfo
 	for pkgName := range data {
 		if strings.EqualFold(pkgName, packageName) {
@@ -126,7 +126,7 @@ func (s FDroid) getAppInfo(data map[string]any, packageName string) (AppInfo, er
 	return appInfo, &AppNotFoundError{PackageName: packageName}
 }
 
-func (s FDroid) findAllPackagesByAuthor(data map[string]any, authorName string) ([]AppInfo, error) {
+func (s *FDroid) findAllPackagesByAuthor(data map[string]any, authorName string) ([]AppInfo, error) {
 	var appsInfo []AppInfo
 
 	for pkgName := range data {
@@ -149,7 +149,7 @@ func (s FDroid) findAllPackagesByAuthor(data map[string]any, authorName string) 
 	return appsInfo, nil
 }
 
-func (s FDroid) findNeededVersion(appInfo AppInfo, versionCode int) (Version, error) {
+func (s *FDroid) findNeededVersion(appInfo AppInfo, versionCode int) (Version, error) {
 	version := Version{
 		Type: APK,
 	}
@@ -194,7 +194,7 @@ func (s FDroid) findNeededVersion(appInfo AppInfo, versionCode int) (Version, er
 	return version, err
 }
 
-func (s FDroid) FindByPackage(packageName string, versionCode int) (Version, error) {
+func (s *FDroid) FindByPackage(packageName string, versionCode int) (Version, error) {
 	var version Version
 
 	data, err := s.getJson()
@@ -208,7 +208,7 @@ func (s FDroid) FindByPackage(packageName string, versionCode int) (Version, err
 	return s.findNeededVersion(appInfo, versionCode)
 }
 
-func (s FDroid) FindByDeveloper(developerId string) ([]string, error) {
+func (s *FDroid) FindByDeveloper(developerId string) ([]string, error) {
 	var packages []string
 	var err error
 	data, err := s.getJson()
@@ -226,7 +226,8 @@ func (s FDroid) FindByDeveloper(developerId string) ([]string, error) {
 }
 
 func init() {
-	s := FDroid{}
+	s := &FDroid{}
 	s.appsCache = make(map[string]map[string]any)
+	s.Source = s
 	Register(s)
 }

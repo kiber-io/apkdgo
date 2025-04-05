@@ -1,7 +1,6 @@
 package main
 
 import (
-	"errors"
 	"fmt"
 	"os"
 	"os/signal"
@@ -9,10 +8,10 @@ import (
 	"regexp"
 	"strconv"
 	"strings"
-	"sync"
 	"syscall"
 
 	_ "kiber-io/apkd/apkd/devices"
+	"kiber-io/apkd/apkd/logger"
 	"kiber-io/apkd/apkd/sources"
 
 	"slices"
@@ -27,6 +26,7 @@ var outputDir string
 var outputFileName string
 var packagesFile string
 var packageNames []string
+var verbosity int
 
 var selectedSources []string
 var activeSources []sources.Source
@@ -37,6 +37,8 @@ var rootCmd = cobra.Command{
 	Use:   "apkd",
 	Short: "apkd is a tool for downloading APKs from multiple sources",
 	PreRun: func(cmd *cobra.Command, args []string) {
+		logger.Init(verbosity)
+
 		if packagesFile != "" {
 			file, err := os.Open(packagesFile)
 			if err != nil {
@@ -182,6 +184,7 @@ func main() {
 	rootCmd.PersistentFlags().BoolVarP(&forceDownload, "force", "F", false, "force download even if the file already exists")
 	rootCmd.PersistentFlags().StringVarP(&outputDir, "output-dir", "O", "", "output directory for downloaded APKs")
 	rootCmd.PersistentFlags().StringVarP(&outputFileName, "output-file", "o", "", "output file name for downloaded APKs")
+	rootCmd.PersistentFlags().CountVarP(&verbosity, "verbose", "v", "Set verbosity level. Use -v or -vv for more verbosity")
 
 	if err := rootCmd.Execute(); err != nil {
 		fmt.Fprintln(os.Stderr, err)
@@ -212,40 +215,4 @@ func sanitizedAndAbsoluteName(name string) (string, error, error) {
 		return absPath, nil, fmt.Errorf("name %s is not valid. Using %s instead", base, sanitizedName)
 	}
 	return absPath, nil, nil
-}
-
-func findVersion(packageName string, versionCode int) (sources.Version, sources.Source, []sources.Error) {
-	var wg sync.WaitGroup
-	var mu sync.Mutex
-	var latestSource sources.Source
-	var latestVersion sources.Version
-	var appNotFoundError *sources.AppNotFoundError
-	var sourcesErrors []sources.Error
-	for _, source := range activeSources {
-		wg.Add(1)
-		go func(src sources.Source) {
-			defer wg.Done()
-			version, err := src.FindByPackage(packageName, versionCode)
-			if err != nil {
-				if !errors.As(err, &appNotFoundError) {
-					sourcesErrors = append(sourcesErrors, sources.Error{
-						SourceName:  src.Name(),
-						PackageName: packageName,
-						Err:         err,
-					})
-				}
-				return
-			}
-			mu.Lock()
-			if version.Code > latestVersion.Code {
-				latestVersion = version
-				latestSource = src
-			}
-			mu.Unlock()
-		}(source)
-	}
-
-	wg.Wait()
-
-	return latestVersion, latestSource, sourcesErrors
 }

@@ -17,11 +17,11 @@ type RuStore struct {
 	appsCache map[string]map[string]any
 }
 
-func (s RuStore) Name() string {
+func (s *RuStore) Name() string {
 	return "rustore"
 }
 
-func (s RuStore) Download(version Version) (io.ReadCloser, error) {
+func (s *RuStore) Download(version Version) (io.ReadCloser, error) {
 	appInfo, err := s.getAppInfo(version.PackageName)
 	if err != nil {
 		return nil, err
@@ -31,7 +31,7 @@ func (s RuStore) Download(version Version) (io.ReadCloser, error) {
 	if err != nil {
 		return nil, err
 	}
-	req, err := http.NewRequest("GET", downloadLink, nil)
+	req, err := s.NewRequest("GET", downloadLink, nil)
 	if err != nil {
 		return nil, err
 	}
@@ -39,7 +39,7 @@ func (s RuStore) Download(version Version) (io.ReadCloser, error) {
 	return createResponseReader(req)
 }
 
-func (s RuStore) generateDeviceId() string {
+func (s *RuStore) generateDeviceId() string {
 	const charset = "abcdefghijklmnopqrstuvwxyz0123456789"
 	b1 := make([]byte, 16)
 	_, err := crand.Read(b1)
@@ -71,7 +71,7 @@ func (s RuStore) generateDeviceId() string {
 	return string(b1) + "--" + string(b2)
 }
 
-func (s RuStore) addHeaders(req *http.Request) {
+func (s *RuStore) addHeaders(req *http.Request) {
 	device := devices.GetRandomDevice()
 	req.Header.Add("User-Agent", "RuStore/1.61.0.2 (Android "+device.BuildVersionRelease+"; SDK "+strconv.Itoa(device.BuildVersionSdkInt)+"; "+device.Platforms[0]+"; "+device.BuildModel+"; en)")
 	req.Header.Add("Connection", "Keep-Alive")
@@ -87,14 +87,14 @@ func (s RuStore) addHeaders(req *http.Request) {
 	req.Header.Add("ruStoreVerCode", "1061002")
 }
 
-func (s RuStore) getAppInfo(packageName string) (map[string]any, error) {
+func (s *RuStore) getAppInfo(packageName string) (map[string]any, error) {
 	if appInfo, ok := s.appsCache[packageName]; ok {
 		return appInfo, nil
 	}
 	// If the app info is not in the cache, fetch it from the API
 	// and store it in the cache
 	url := "https://backapi.rustore.ru/applicationData/overallInfo/" + packageName
-	req, err := http.NewRequest("GET", url, nil)
+	req, err := s.NewRequest("GET", url, nil)
 	if err != nil {
 		return nil, err
 	}
@@ -131,7 +131,7 @@ func (s RuStore) getAppInfo(packageName string) (map[string]any, error) {
 	return nil, &AppNotFoundError{PackageName: packageName}
 }
 
-func (s RuStore) getDownloadLink(appId float64) (string, error) {
+func (s *RuStore) getDownloadLink(appId float64) (string, error) {
 	url := "https://backapi.rustore.ru/applicationData/v2/download-link"
 	device := devices.GetRandomDevice()
 	payloadData := map[string]any{
@@ -152,7 +152,7 @@ func (s RuStore) getDownloadLink(appId float64) (string, error) {
 		return "", err
 	}
 	payload := bytes.NewReader(payloadBytes)
-	req, err := http.NewRequest("POST", url, payload)
+	req, err := s.NewRequest("POST", url, payload)
 
 	if err != nil {
 		return "", err
@@ -202,7 +202,7 @@ func (s RuStore) getDownloadLink(appId float64) (string, error) {
 	return downloadUrl["url"].(string), nil
 }
 
-func (s RuStore) FindByPackage(packageName string, versionCode int) (Version, error) {
+func (s *RuStore) FindByPackage(packageName string, versionCode int) (Version, error) {
 	appInfo, err := s.getAppInfo(packageName)
 	if err != nil {
 		return Version{}, err
@@ -225,13 +225,13 @@ func (s RuStore) FindByPackage(packageName string, versionCode int) (Version, er
 	return version, nil
 }
 
-func (s RuStore) MaxParallelsDownloads() int {
+func (s *RuStore) MaxParallelsDownloads() int {
 	return 3
 }
 
-func (s RuStore) FindByDeveloper(developerId string) ([]string, error) {
+func (s *RuStore) FindByDeveloper(developerId string) ([]string, error) {
 	url := "https://backapi.rustore.ru/applicationData/devs/" + developerId + "/apps?limit=1000"
-	req, err := http.NewRequest("GET", url, nil)
+	req, err := s.NewRequest("GET", url, nil)
 	if err != nil {
 		return nil, err
 	}
@@ -272,8 +272,9 @@ func (s RuStore) FindByDeveloper(developerId string) ([]string, error) {
 }
 
 func init() {
-	s := RuStore{
+	s := &RuStore{
 		appsCache: make(map[string]map[string]any),
 	}
+	s.Source = s
 	Register(s)
 }

@@ -2,11 +2,14 @@ package sources
 
 import (
 	"compress/gzip"
+	"context"
 	"fmt"
 	"io"
+	"kiber-io/apkd/apkd/logger"
 	"net/http"
 	"os"
 	"strings"
+	"time"
 
 	"github.com/vbauerster/mpb/v8"
 )
@@ -19,7 +22,13 @@ type Source interface {
 	Download(version Version) (io.ReadCloser, error)
 }
 
-type BaseSource struct{}
+type contextKey string
+
+const ctxModuleKey = contextKey("module")
+
+type BaseSource struct {
+	Source
+}
 
 type Error struct {
 	error
@@ -28,11 +37,11 @@ type Error struct {
 	Err         error
 }
 
-func (s BaseSource) MaxParallelsDownloads() int {
+func (s *BaseSource) MaxParallelsDownloads() int {
 	return 1
 }
 
-func (s BaseSource) FindByDeveloper(developerId string) ([]string, error) {
+func (s *BaseSource) FindByDeveloper(developerId string) ([]string, error) {
 	return []string{}, nil
 }
 
@@ -74,16 +83,16 @@ func (e *AppNotFoundError) Error() string {
 
 var sources = make(map[string]Source)
 
-func Register(d Source) {
-	if _, exists := sources[d.Name()]; exists {
-		fmt.Fprintf(os.Stderr, "Source %s is already registered!\n", d.Name())
+func Register(s Source) {
+	if _, exists := sources[s.Name()]; exists {
+		fmt.Fprintf(os.Stderr, "Source %s is already registered!\n", s.Name())
 		os.Exit(1)
 	}
-	if d.Name() != strings.ToLower(d.Name()) {
-		fmt.Fprintf(os.Stderr, "Source name %s should be lowercase!\n", d.Name())
+	if s.Name() != strings.ToLower(s.Name()) {
+		fmt.Fprintf(os.Stderr, "Source name %s should be lowercase!\n", s.Name())
 		os.Exit(1)
 	}
-	sources[d.Name()] = d
+	sources[s.Name()] = s
 }
 
 func GetAll() map[string]Source {
@@ -122,4 +131,65 @@ func createResponseReader(req *http.Request) (io.ReadCloser, error) {
 		return nil, fmt.Errorf("error: %s", resp.Status)
 	}
 	return resp.Body, nil
+}
+
+type LoggingRoundTripper struct {
+	original http.RoundTripper
+}
+
+func (lrt *LoggingRoundTripper) RoundTrip(req *http.Request) (*http.Response, error) {
+	moduleName := "unknown"
+	if val := req.Context().Value(ctxModuleKey); val != nil {
+		moduleName = val.(string)
+	}
+	requestID := fmt.Sprintf("%s-%d", moduleName, time.Now().UnixNano())
+	logger.Logd(fmt.Sprintf("[req %s] Request URL: %s", requestID, req.URL.String()))
+	// for name, values := range req.Header {
+	// 	for _, v := range values {
+	// 		fmt.Printf("%s: %s\n", name, v)
+	// 	}
+	// }
+	// if req.Body != nil {
+	// 	bodyBytes, _ := io.ReadAll(req.Body)
+	// 	fmt.Println("Body:", string(bodyBytes))
+	// 	// Восстанавливаем тело, иначе клиент не сможет отправить его
+	// 	req.Body = io.NopCloser(bytes.NewBuffer(bodyBytes))
+	// }
+
+	// Выполняем реальный запрос
+	resp, err := lrt.original.RoundTrip(req)
+	if err != nil {
+		return resp, err
+	}
+
+	// Логируем ответ
+	logger.Logd(fmt.Sprintf("[req %s] Response Status: %s", requestID, resp.Status))
+	// for name, values := range resp.Header {
+	// 	for _, v := range values {
+	// 		fmt.Printf("%s: %s\n", name, v)
+	// 	}
+	// }
+	// if resp.Body != nil {
+	// 	bodyBytes, _ := io.ReadAll(resp.Body)
+	// 	fmt.Println("Body:", string(bodyBytes))
+	// 	resp.Body = io.NopCloser(bytes.NewBuffer(bodyBytes))
+	// }
+
+	return resp, nil
+}
+
+func (s *BaseSource) NewRequest(method, url string, body io.Reader) (*http.Request, error) {
+	req, err := http.NewRequest(method, url, body)
+	if err != nil {
+		return nil, err
+	}
+	ctx := context.WithValue(context.Background(), ctxModuleKey, s.Source.Name())
+	req = req.WithContext(ctx)
+	return req, nil
+}
+
+func init() {
+	http.DefaultTransport = &LoggingRoundTripper{
+		original: http.DefaultTransport,
+	}
 }

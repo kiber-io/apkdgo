@@ -19,11 +19,11 @@ type ApkCombo struct {
 	BaseSource
 }
 
-func (s ApkCombo) Name() string {
+func (s *ApkCombo) Name() string {
 	return "apkcombo"
 }
-func (s ApkCombo) Download(version Version) (io.ReadCloser, error) {
-	req, err := http.NewRequest("GET", version.Link, nil)
+func (s *ApkCombo) Download(version Version) (io.ReadCloser, error) {
+	req, err := s.NewRequest("GET", version.Link, nil)
 	if err != nil {
 		return nil, err
 	}
@@ -31,7 +31,7 @@ func (s ApkCombo) Download(version Version) (io.ReadCloser, error) {
 	return createResponseReader(req)
 }
 
-func (s ApkCombo) addHeaders(req *http.Request) {
+func (s *ApkCombo) addHeaders(req *http.Request) {
 	req.Header.Add("User-Agent", browsers.GetRandomUserAgent())
 	req.Header.Add("Accept", "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8")
 	req.Header.Add("Accept-Encoding", "gzip")
@@ -46,12 +46,12 @@ func (s ApkCombo) addHeaders(req *http.Request) {
 	req.Header.Add("te", "trailers")
 }
 
-func (s ApkCombo) FindByPackage(packageName string, versionCode int) (Version, error) {
+func (s *ApkCombo) FindByPackage(packageName string, versionCode int) (Version, error) {
 	var version Version
 
 	url := "https://apkcombo.com/search?q=" + packageName
 
-	req, err := http.NewRequest("GET", url, nil)
+	req, err := s.NewRequest("GET", url, nil)
 
 	if err != nil {
 		return version, err
@@ -98,7 +98,7 @@ func (s ApkCombo) FindByPackage(packageName string, versionCode int) (Version, e
 			return version, &AppNotFoundError{PackageName: packageName}
 		}
 		packageName = lastPart
-		req, err = http.NewRequest("GET", link, nil)
+		req, err = s.NewRequest("GET", link, nil)
 		if err != nil {
 			return version, err
 		}
@@ -129,7 +129,7 @@ func (s ApkCombo) FindByPackage(packageName string, versionCode int) (Version, e
 	if err != nil {
 		return version, err
 	}
-	req, err = http.NewRequest("GET", url, nil)
+	req, err = s.NewRequest("GET", url, nil)
 	if err != nil {
 		return version, err
 	}
@@ -147,8 +147,8 @@ func (s ApkCombo) FindByPackage(packageName string, versionCode int) (Version, e
 	if err != nil {
 		return version, err
 	}
-	doc.Find(".ver-item").EachWithBreak(func(i int, s *goquery.Selection) bool {
-		link, exists := s.Attr("href")
+	doc.Find(".ver-item").EachWithBreak(func(i int, q *goquery.Selection) bool {
+		link, exists := q.Attr("href")
 		if !exists {
 			return true
 		}
@@ -157,7 +157,7 @@ func (s ApkCombo) FindByPackage(packageName string, versionCode int) (Version, e
 			return true
 		}
 		link = res.Request.URL.ResolveReference(linkUrl).String()
-		req, err = http.NewRequest("GET", link, nil)
+		req, err = s.NewRequest("GET", link, nil)
 		if err != nil {
 			return true
 		}
@@ -258,11 +258,11 @@ func (s ApkCombo) FindByPackage(packageName string, versionCode int) (Version, e
 	return version, nil
 }
 
-func (s ApkCombo) FindByDeveloper(developerId string) ([]string, error) {
+func (s *ApkCombo) FindByDeveloper(developerId string) ([]string, error) {
 	var packages []string
 
 	url := "https://apkcombo.com/developer/" + developerId
-	req, err := http.NewRequest("GET", url, nil)
+	req, err := s.NewRequest("GET", url, nil)
 	if err != nil {
 		return packages, err
 	}
@@ -316,6 +316,7 @@ func (s ApkCombo) FindByDeveloper(developerId string) ([]string, error) {
 }
 
 func init() {
-	s := ApkCombo{}
+	s := &ApkCombo{}
+	s.Source = s
 	Register(s)
 }

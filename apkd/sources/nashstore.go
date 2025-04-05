@@ -33,11 +33,11 @@ type NashStore struct {
 	BaseSource
 }
 
-func (s NashStore) Name() string {
+func (s *NashStore) Name() string {
 	return "nashstore"
 }
 
-func (s NashStore) answer42() string {
+func (s *NashStore) answer42() string {
 	encrypted := []byte{
 		0x31, 0x66, 0x67, 0x66, 0x30, 0x6d, 0x67, 0x37,
 		0x67, 0x34, 0x66, 0x36, 0x34, 0x31, 0x30, 0x6c,
@@ -56,7 +56,7 @@ func (s NashStore) answer42() string {
 	return string(encrypted)
 }
 
-func (s NashStore) getAppInfo(packageName string) (AppInfoNashStore, error) {
+func (s *NashStore) getAppInfo(packageName string) (AppInfoNashStore, error) {
 	var appInfo AppInfoNashStore
 	url := "https://store.nashstore.ru/api/mobile/v1/profile/updates"
 	payloadData := map[string]any{
@@ -76,7 +76,7 @@ func (s NashStore) getAppInfo(packageName string) (AppInfoNashStore, error) {
 		return appInfo, err
 	}
 	payload := bytes.NewReader(payloadBytes)
-	req, err := http.NewRequest("POST", url, payload)
+	req, err := s.NewRequest("POST", url, payload)
 
 	if err != nil {
 		return appInfo, err
@@ -153,7 +153,7 @@ func (s NashStore) getAppInfo(packageName string) (AppInfoNashStore, error) {
 	return appInfo, fmt.Errorf("failed to parse app info")
 }
 
-func (s NashStore) FindByPackage(packageName string, versionCode int) (Version, error) {
+func (s *NashStore) FindByPackage(packageName string, versionCode int) (Version, error) {
 	var version Version
 	appInfo, err := s.getAppInfo(packageName)
 	if err != nil {
@@ -173,7 +173,7 @@ func (s NashStore) FindByPackage(packageName string, versionCode int) (Version, 
 	return version, nil
 }
 
-func (s NashStore) addHeaders(req *http.Request) error {
+func (s *NashStore) addHeaders(req *http.Request) error {
 	device := devices.GetRandomDevice()
 	caser := cases.Title(language.English)
 	deviceBrand := caser.String(device.BuildBrand)
@@ -205,8 +205,8 @@ func (s NashStore) addHeaders(req *http.Request) error {
 	return nil
 }
 
-func (s NashStore) Download(version Version) (io.ReadCloser, error) {
-	req, err := http.NewRequest("GET", version.Link, nil)
+func (s *NashStore) Download(version Version) (io.ReadCloser, error) {
+	req, err := s.NewRequest("GET", version.Link, nil)
 	if err != nil {
 		return nil, err
 	}
@@ -216,14 +216,14 @@ func (s NashStore) Download(version Version) (io.ReadCloser, error) {
 	return createResponseReader(req)
 }
 
-func (s NashStore) MaxParallelsDownloads() int {
+func (s *NashStore) MaxParallelsDownloads() int {
 	return 3
 }
 
-func (s NashStore) FindByDeveloper(developerId string) ([]string, error) {
+func (s *NashStore) FindByDeveloper(developerId string) ([]string, error) {
 	url := "https://store.nashstore.ru/api/mobile/v1/application/" + developerId
 
-	req, err := http.NewRequest("GET", url, nil)
+	req, err := s.NewRequest("GET", url, nil)
 
 	if err != nil {
 		return nil, err
@@ -277,6 +277,7 @@ func (s NashStore) FindByDeveloper(developerId string) ([]string, error) {
 }
 
 func init() {
-	s := NashStore{}
+	s := &NashStore{}
+	s.Source = s
 	Register(s)
 }

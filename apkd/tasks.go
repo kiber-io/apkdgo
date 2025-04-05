@@ -1,9 +1,12 @@
 package main
 
 import (
+	"errors"
 	"fmt"
 	"io"
+	"kiber-io/apkd/apkd/logger"
 	"kiber-io/apkd/apkd/sources"
+	"log"
 	"os"
 	"path/filepath"
 	"slices"
@@ -46,8 +49,9 @@ func NewTaskQueue(maxWorkers int) *TaskQueue {
 		maxWorkers: maxWorkers,
 		progress:   mpb.New(mpb.WithAutoRefresh(), mpb.WithWaitGroup(&wg)),
 	}
+	log.SetOutput(tq.progress)
 
-	for range maxWorkers {
+	for range tq.maxWorkers {
 		go tq.worker()
 	}
 
@@ -55,6 +59,11 @@ func NewTaskQueue(maxWorkers int) *TaskQueue {
 }
 
 func (tq *TaskQueue) AddTask(task Task) {
+	if pkgTask, ok := task.(PackageTask); ok {
+		logger.Logi(fmt.Sprintf("Adding task: %s", pkgTask.PackageName))
+	} else if verTask, ok := task.(VersionTask); ok {
+		logger.Logi(fmt.Sprintf("Adding task: %s", verTask.Version.PackageName))
+	}
 	tq.wg.Add(1)
 	tq.queue <- task
 }
@@ -120,7 +129,7 @@ func (tq *TaskQueue) processPackageTask(task PackageTask) {
 		p := 3000 - bar.ID()
 		bar.SetPriority(p)
 	}
-	version, source, errs := findVersion(task.PackageName, task.VersionCode)
+	version, source, errs := tq.findVersion(task.PackageName, task.VersionCode)
 	for _, err := range errs {
 		collectedErrors = append(collectedErrors, fmt.Sprintf("Source: %s, Package: %s, Error: %s", err.SourceName, err.PackageName, err.Err.Error()))
 	}
@@ -152,6 +161,7 @@ func (tq *TaskQueue) processPackageTask(task PackageTask) {
 			}
 		}
 		processedDevelopers[version.DeveloperId] = append(processedDevelopers[version.DeveloperId], source.Name())
+		logger.Logi(fmt.Sprintf("Searching for packages by developer %s at source %s", version.DeveloperId, source.Name()))
 		packages, err := source.FindByDeveloper(version.DeveloperId)
 		if err != nil {
 			collectedErrors = append(collectedErrors, fmt.Sprintf("Error finding packages by developer %s at source %s: %v", version.DeveloperId, source.Name(), err))
@@ -160,6 +170,7 @@ func (tq *TaskQueue) processPackageTask(task PackageTask) {
 		}
 		for _, packageName := range packages {
 			if !slices.Contains(tq.processedPackages, packageName) {
+				logger.Logs(fmt.Sprintf("Found package %s by developer %s at source %s", packageName, version.DeveloperId, source.Name()))
 				newTask := PackageTask{
 					PackageName: packageName,
 				}
@@ -214,12 +225,14 @@ func (tq *TaskQueue) processVersionTask(task VersionTask) {
 			tq.showErrorBar(bar, task, "error")
 			return
 		}
+		logger.Logi(fmt.Sprintf("File %s already exists. Removing...", outFile))
 		if err := os.Remove(outFile); err != nil {
 			collectedErrors = append(collectedErrors, fmt.Sprintf("Error removing existing file %s: %v", outFile, err))
 			tq.showErrorBar(bar, task, "error")
 			return
 		}
 	}
+	logger.Logi(fmt.Sprintf("Downloading package %s from source %s to file %s", task.Version.PackageName, task.Source.Name(), outFile))
 	reader, err := task.Source.Download(task.Version)
 	if err != nil {
 		collectedErrors = append(collectedErrors, fmt.Sprintf("Error downloading package %s from source %s: %v", task.Version.PackageName, task.Source.Name(), err))
@@ -240,6 +253,7 @@ func (tq *TaskQueue) processVersionTask(task VersionTask) {
 		collectedErrors = append(collectedErrors, fmt.Sprintf("Error saving file %s: %v", outFile, err))
 		tq.showErrorBar(bar, task, "error")
 	}
+	logger.Logs(fmt.Sprintf("Package %s downloaded successfully", task.Version.PackageName))
 }
 
 func (tq *TaskQueue) showErrorBar(prevBar *mpb.Bar, task Task, errorText string) {
@@ -254,4 +268,45 @@ func (tq *TaskQueue) showErrorBar(prevBar *mpb.Bar, task Task, errorText string)
 	prevBar.SetPriority(p)
 	prevBar.Abort(true)
 	barError.Abort(false)
+}
+
+func (tq *TaskQueue) findVersion(packageName string, versionCode int) (sources.Version, sources.Source, []sources.Error) {
+	var wg sync.WaitGroup
+	var mu sync.Mutex
+	var latestSource sources.Source
+	var latestVersion sources.Version
+	var appNotFoundError *sources.AppNotFoundError
+	var sourcesErrors []sources.Error
+	logger.Logi(fmt.Sprintf("Searching for package %s in %d sources", packageName, len(activeSources)))
+	for _, source := range activeSources {
+		wg.Add(1)
+		go func(src sources.Source) {
+			defer wg.Done()
+			version, err := src.FindByPackage(packageName, versionCode)
+			if err != nil {
+				if !errors.As(err, &appNotFoundError) {
+					logger.Loge(fmt.Sprintf("Error finding package %s at source %s: %v", packageName, src.Name(), err))
+					sourcesErrors = append(sourcesErrors, sources.Error{
+						SourceName:  src.Name(),
+						PackageName: packageName,
+						Err:         err,
+					})
+				} else {
+					logger.Logw(fmt.Sprintf("Package %s not found at source %s", packageName, src.Name()))
+				}
+				return
+			}
+			mu.Lock()
+			logger.Logs(fmt.Sprintf("Found package %s v%s (%v) at source %s", packageName, version.Name, version.Code, src.Name()))
+			if version.Code > latestVersion.Code {
+				latestVersion = version
+				latestSource = src
+			}
+			mu.Unlock()
+		}(source)
+	}
+
+	wg.Wait()
+
+	return latestVersion, latestSource, sourcesErrors
 }
