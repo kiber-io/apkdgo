@@ -5,8 +5,11 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
-	"kiber-io/apkd/apkd/devices"
+	"math/rand"
 	"net/http"
+	"time"
+
+	"github.com/kiber-io/apkd/apkd/devices"
 
 	"golang.org/x/text/cases"
 	"golang.org/x/text/language"
@@ -56,6 +59,15 @@ func (s *NashStore) answer42() string {
 	return string(encrypted)
 }
 
+func (s *NashStore) getRandomTimestamp() int64 {
+	generator := rand.New(rand.NewSource(time.Now().UnixNano()))
+	minutesToSubtract := generator.Intn(31) + 30
+	now := time.Now()
+	randomTime := now.Add(-time.Duration(minutesToSubtract) * time.Minute)
+	timestampMillis := randomTime.UnixNano() / int64(time.Millisecond)
+	return timestampMillis
+}
+
 func (s *NashStore) getAppInfo(packageName string) (AppInfoNashStore, error) {
 	var appInfo AppInfoNashStore
 	url := "https://store.nashstore.ru/api/mobile/v1/profile/updates"
@@ -64,8 +76,8 @@ func (s *NashStore) getAppInfo(packageName string) (AppInfoNashStore, error) {
 			packageName: map[string]any{
 				"appName":          packageName,
 				"versionName":      "1.0",
-				"firstInstallTime": 1740674665743,
-				"lastUpdateTime":   1740698043008,
+				"firstInstallTime": s.getRandomTimestamp(),
+				"lastUpdateTime":   s.getRandomTimestamp(),
 				"versionCode":      1,
 				"packageName":      packageName,
 			},
