@@ -10,9 +10,9 @@ import (
 	"strings"
 	"syscall"
 
-	_ "kiber-io/apkd/apkd/devices"
-	"kiber-io/apkd/apkd/logger"
-	"kiber-io/apkd/apkd/sources"
+	_ "github.com/kiber-io/apkd/apkd/devices"
+	"github.com/kiber-io/apkd/apkd/logger"
+	"github.com/kiber-io/apkd/apkd/sources"
 
 	"slices"
 
@@ -33,10 +33,21 @@ var activeSources []sources.Source
 
 var collectedErrors []string
 
+var (
+	version   = "dev"
+	commit    = "none"
+	buildDate = "unknown"
+)
+
 var rootCmd = cobra.Command{
 	Use:   "apkd",
 	Short: "apkd is a tool for downloading APKs from multiple sources",
 	PreRun: func(cmd *cobra.Command, args []string) {
+		if versionFlag, _ := cmd.Flags().GetBool("version"); versionFlag {
+			fmt.Printf("Version: %s\nCommit: %s\nBuilt at: %s\n", version, commit, buildDate)
+			os.Exit(0)
+		}
+
 		logger.Init(verbosity)
 
 		if packagesFile != "" {
@@ -185,6 +196,8 @@ func main() {
 	rootCmd.PersistentFlags().StringVarP(&outputDir, "output-dir", "O", "", "output directory for downloaded APKs")
 	rootCmd.PersistentFlags().StringVarP(&outputFileName, "output-file", "o", "", "output file name for downloaded APKs")
 	rootCmd.PersistentFlags().CountVarP(&verbosity, "verbose", "v", "Set verbosity level. Use -v or -vv for more verbosity")
+
+	rootCmd.PersistentFlags().BoolP("version", "V", false, "print version and exit")
 
 	if err := rootCmd.Execute(); err != nil {
 		fmt.Fprintln(os.Stderr, err)
