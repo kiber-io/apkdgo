@@ -121,7 +121,7 @@ func (s ApkCombo) FindByPackage(packageName string, versionCode int) (Version, e
 
 	authorBlock := doc.Find(".author .is-link")
 	if authorBlock.Length() == 0 {
-		return version, fmt.Errorf("author not found")
+		return version, &AppNotFoundError{PackageName: packageName}
 	}
 	authorName := strings.TrimSpace(authorBlock.Text())
 
