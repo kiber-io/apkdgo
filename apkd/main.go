@@ -27,6 +27,8 @@ var outputFileName string
 var packagesFile string
 var packageNames []string
 var verbosity int
+var listSources bool
+var printVersion bool
 
 var selectedSources []string
 var activeSources []sources.Source
@@ -43,12 +45,11 @@ var rootCmd = cobra.Command{
 	Use:   "apkd",
 	Short: "apkd is a tool for downloading APKs from multiple sources",
 	PreRun: func(cmd *cobra.Command, args []string) {
-		if versionFlag, _ := cmd.Flags().GetBool("version"); versionFlag {
-			fmt.Printf("Version: %s\nCommit: %s\nBuilt at: %s\n", version, commit, buildDate)
-			os.Exit(0)
-		}
-
 		logger.Init(verbosity)
+
+		if listSources || printVersion {
+			return
+		}
 
 		if packagesFile != "" {
 			file, err := os.Open(packagesFile)
@@ -157,24 +158,34 @@ var rootCmd = cobra.Command{
 		}
 	},
 	Run: func(cmd *cobra.Command, args []string) {
-		sigChan := make(chan os.Signal, 1)
-		signal.Notify(sigChan, syscall.SIGINT, syscall.SIGTERM)
-		go func() {
-			<-sigChan
+		if printVersion {
+			fmt.Printf("Version: %s\nCommit: %s\nBuilt at: %s\n", version, commit, buildDate)
+		} else if listSources {
+			fmt.Println("Available sources:")
+			allSources := sources.GetAll()
+			for _, src := range allSources {
+				fmt.Printf("- %s\n", src.Name())
+			}
+		} else {
+			sigChan := make(chan os.Signal, 1)
+			signal.Notify(sigChan, syscall.SIGINT, syscall.SIGTERM)
+			go func() {
+				<-sigChan
+				printCollectedErrors()
+				os.Exit(0)
+			}()
+
+			tq := NewTaskQueue(3)
+			for packageName, versionCode := range packageNamesMap {
+				tq.AddTask(PackageTask{
+					PackageName: packageName,
+					VersionCode: versionCode,
+				})
+			}
+
+			tq.Wait()
 			printCollectedErrors()
-			os.Exit(0)
-		}()
-
-		tq := NewTaskQueue(3)
-		for packageName, versionCode := range packageNamesMap {
-			tq.AddTask(PackageTask{
-				PackageName: packageName,
-				VersionCode: versionCode,
-			})
 		}
-
-		tq.Wait()
-		printCollectedErrors()
 	},
 }
 
@@ -196,8 +207,8 @@ func main() {
 	rootCmd.PersistentFlags().StringVarP(&outputDir, "output-dir", "O", "", "output directory for downloaded APKs")
 	rootCmd.PersistentFlags().StringVarP(&outputFileName, "output-file", "o", "", "output file name for downloaded APKs")
 	rootCmd.PersistentFlags().CountVarP(&verbosity, "verbose", "v", "Set verbosity level. Use -v or -vv for more verbosity")
-
-	rootCmd.PersistentFlags().BoolP("version", "V", false, "print version and exit")
+	rootCmd.PersistentFlags().BoolVarP(&listSources, "list-sources", "l", false, "list available sources")
+	rootCmd.PersistentFlags().BoolVarP(&printVersion, "version", "V", false, "print version and exit")
 
 	if err := rootCmd.Execute(); err != nil {
 		fmt.Fprintln(os.Stderr, err)
