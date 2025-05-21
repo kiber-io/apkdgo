@@ -6,7 +6,7 @@ require (
 	github.com/kiber-io/properties v0.0.0-20250315142644-8111fd7ed7f8
 	github.com/spf13/cobra v1.8.1
 	github.com/vbauerster/mpb/v8 v8.9.3
-	golang.org/x/text v0.23.0
+	golang.org/x/text v0.25.0
 )
 
 require (
@@ -21,6 +21,6 @@ require (
 	github.com/mattn/go-runewidth v0.0.16 // indirect
 	github.com/rivo/uniseg v0.4.7 // indirect
 	github.com/spf13/pflag v1.0.5 // indirect
-	golang.org/x/net v0.35.0 // indirect
-	golang.org/x/sys v0.31.0 // indirect
+	golang.org/x/net v0.40.0 // indirect
+	golang.org/x/sys v0.33.0 // indirect
 )
