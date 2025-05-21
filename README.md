@@ -71,6 +71,12 @@ apkd [flags]
   apkd -V
   ```
 
+- `--list-sources`, `-l`:
+  List all available sources. Example:
+  ```bash
+  apkd -l
+  ```
+
 ## Example
 
 Download an APK for a specific package from a specific source:
