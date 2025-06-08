@@ -17,7 +17,7 @@ build() {
 
     echo "Building for $os $arch..."
 
-    GOOS=$os GOARCH=$arch CGO_ENABLED=0 go build -o "$OUTPUT_DIR/$output_name" -ldflags "-s -w -X 'main.version=$VERSION' -X 'main.commit=$COMMIT' -X 'main.buildDate=$BUILD_DATE'" ./apkd
+    GOOS=$os GOARCH=$arch CGO_ENABLED=0 go build -o "$OUTPUT_DIR/$output_name" -ldflags "-s -w -X 'main.version=$VERSION' -X 'main.commit=$COMMIT' -X 'main.buildDate=$BUILD_DATE'" -trimpath ./apkd
 
     if [ $? -eq 0 ]; then
         echo "Successfully built $output_name"
