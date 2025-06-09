@@ -22,7 +22,7 @@ function Build {
     $env:GOOS = $os
     $env:GOARCH = $arch
     $env:CGO_ENABLED = 0
-    & go build -o "$OUTPUT_DIR\$output_name" -ldflags "-s -w -X 'main.version=$version' -X 'main.commit=$commit' -X 'main.buildDate=$buildDate'" ./apkd/
+    & go build -o "$OUTPUT_DIR\$output_name" -ldflags "-s -w -X 'main.version=$version' -X 'main.commit=$commit' -X 'main.buildDate=$buildDate'" -trimpath ./apkd/
 
     if ($?) {
         Write-Output "Successfully built $output_name"
