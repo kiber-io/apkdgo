@@ -253,6 +253,18 @@ func (tq *TaskQueue) processVersionTask(task VersionTask) {
 	if _, err = io.Copy(file, progressReader); err != nil {
 		collectedErrors = append(collectedErrors, fmt.Sprintf("Error saving file %s: %v", outFile, err))
 		tq.showErrorBar(bar, task, "error")
+		return
+	}
+	source, ok := task.Source.(*sources.RuStore)
+	if ok {
+		file.Close()
+		// workaround for rustore: it's respond with zip file in which apk is stored
+		err := source.ExtractApkFromZip(outFile)
+		if err != nil {
+			collectedErrors = append(collectedErrors, fmt.Sprintf("Error extracting APK from zip file %s: %v", outFile, err))
+			return
+		}
+
 	}
 	logger.Logs(fmt.Sprintf("Package %s downloaded successfully", task.Version.PackageName))
 }

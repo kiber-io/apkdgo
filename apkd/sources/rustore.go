@@ -1,16 +1,22 @@
 package sources
 
 import (
+	"archive/zip"
 	"bytes"
 	crand "crypto/rand"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
 	mrand "math/rand"
 	"net/http"
+	"os"
+	"path/filepath"
 	"strconv"
+	"strings"
 
 	"github.com/kiber-io/apkd/apkd/devices"
+	"github.com/kiber-io/apkd/apkd/logger"
 )
 
 type RuStore struct {
@@ -270,6 +276,61 @@ func (s *RuStore) FindByDeveloper(developerId string) ([]string, error) {
 		packages = append(packages, packageName.(string))
 	}
 	return packages, nil
+}
+
+func (s *RuStore) ExtractApkFromZip(zipFile string) error {
+	logger.Logd(fmt.Sprintf("Extracting .apk from zip file: %s", zipFile))
+	r, err := zip.OpenReader(zipFile)
+	if err != nil {
+		return err
+	}
+	defer r.Close()
+	parentDir := filepath.Dir(zipFile)
+	apkFilePath := filepath.Base(zipFile + ".apk")
+	outPath := filepath.Join(parentDir, apkFilePath)
+
+	unpacked := false
+
+	for _, f := range r.File {
+		if strings.HasSuffix(f.Name, ".apk") {
+			if unpacked {
+				return fmt.Errorf("invalid zip file: multiple .apk files found")
+			}
+
+			rc, err := f.Open()
+			if err != nil {
+				return err
+			}
+			defer rc.Close()
+
+			outFile, err := os.Create(outPath)
+			if err != nil {
+				return err
+			}
+			defer outFile.Close()
+
+			_, err = io.Copy(outFile, rc)
+			if err != nil {
+				return err
+			}
+			outFile.Close()
+			unpacked = true
+		}
+	}
+	if !unpacked {
+		logger.Logd("No .apk file found in the zip archive")
+	}
+
+	r.Close()
+	if err := os.Remove(zipFile); err != nil {
+		return fmt.Errorf("failed to remove zip file %s: %v", zipFile, err)
+	}
+	err = os.Rename(outPath, zipFile)
+	if err != nil {
+		return fmt.Errorf("failed to rename extracted apk file %s to %s: %v", outPath, zipFile, err)
+	}
+
+	return nil
 }
 
 func init() {
