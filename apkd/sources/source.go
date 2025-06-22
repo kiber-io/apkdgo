@@ -145,36 +145,13 @@ func (lrt *LoggingRoundTripper) RoundTrip(req *http.Request) (*http.Response, er
 	}
 	requestID := fmt.Sprintf("%s-%d", moduleName, time.Now().UnixNano())
 	logger.Logd(fmt.Sprintf("[req %s] Request URL: %s", requestID, req.URL.String()))
-	// for name, values := range req.Header {
-	// 	for _, v := range values {
-	// 		fmt.Printf("%s: %s\n", name, v)
-	// 	}
-	// }
-	// if req.Body != nil {
-	// 	bodyBytes, _ := io.ReadAll(req.Body)
-	// 	fmt.Println("Body:", string(bodyBytes))
-	// 	// Восстанавливаем тело, иначе клиент не сможет отправить его
-	// 	req.Body = io.NopCloser(bytes.NewBuffer(bodyBytes))
-	// }
 
-	// Выполняем реальный запрос
 	resp, err := lrt.original.RoundTrip(req)
 	if err != nil {
 		return resp, err
 	}
 
-	// Логируем ответ
 	logger.Logd(fmt.Sprintf("[req %s] Response Status: %s", requestID, resp.Status))
-	// for name, values := range resp.Header {
-	// 	for _, v := range values {
-	// 		fmt.Printf("%s: %s\n", name, v)
-	// 	}
-	// }
-	// if resp.Body != nil {
-	// 	bodyBytes, _ := io.ReadAll(resp.Body)
-	// 	fmt.Println("Body:", string(bodyBytes))
-	// 	resp.Body = io.NopCloser(bytes.NewBuffer(bodyBytes))
-	// }
 
 	return resp, nil
 }
