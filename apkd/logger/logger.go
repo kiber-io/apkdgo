@@ -27,21 +27,15 @@ func Logi(v ...any) {
 	}
 }
 
-func Logw(v ...any) {
-	if verbosity >= 1 {
-		logg(colorWarning, v...)
-	}
-}
-
 func Loge(v ...any) {
 	if verbosity >= 1 {
 		logg(colorError, v...)
 	}
 }
 
-func Logs(v ...any) {
+func Logw(v ...any) {
 	if verbosity >= 1 {
-		logg(colorSuccess, v...)
+		logg(colorWarning, v...)
 	}
 }
 

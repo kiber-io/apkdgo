@@ -61,9 +61,9 @@ func NewTaskQueue(maxWorkers int) *TaskQueue {
 
 func (tq *TaskQueue) AddTask(task Task) {
 	if pkgTask, ok := task.(PackageTask); ok {
-		logger.Logi(fmt.Sprintf("Adding task: %s", pkgTask.PackageName))
+		logger.Logd(fmt.Sprintf("Adding task: %s", pkgTask.PackageName))
 	} else if verTask, ok := task.(VersionTask); ok {
-		logger.Logi(fmt.Sprintf("Adding task: %s", verTask.Version.PackageName))
+		logger.Logd(fmt.Sprintf("Adding task: %s", verTask.Version.PackageName))
 	}
 	tq.wg.Add(1)
 	tq.queue <- task
@@ -162,7 +162,7 @@ func (tq *TaskQueue) processPackageTask(task PackageTask) {
 			}
 		}
 		processedDevelopers[version.DeveloperId] = append(processedDevelopers[version.DeveloperId], source.Name())
-		logger.Logi(fmt.Sprintf("Searching for packages by developer %s at source %s", version.DeveloperId, source.Name()))
+		logger.Logd(fmt.Sprintf("Searching for packages by developer %s at source %s", version.DeveloperId, source.Name()))
 		packages, err := source.FindByDeveloper(version.DeveloperId)
 		if err != nil {
 			collectedErrors = append(collectedErrors, fmt.Sprintf("Error finding packages by developer %s at source %s: %v", version.DeveloperId, source.Name(), err))
@@ -171,7 +171,7 @@ func (tq *TaskQueue) processPackageTask(task PackageTask) {
 		}
 		for _, packageName := range packages {
 			if !slices.Contains(tq.processedPackages, packageName) {
-				logger.Logs(fmt.Sprintf("Found package %s by developer %s at source %s", packageName, version.DeveloperId, source.Name()))
+				logger.Logd(fmt.Sprintf("Found package %s by developer %s at source %s", packageName, version.DeveloperId, source.Name()))
 				newTask := PackageTask{
 					PackageName: packageName,
 				}
@@ -226,7 +226,7 @@ func (tq *TaskQueue) processVersionTask(task VersionTask) {
 			tq.showErrorBar(bar, task, "error")
 			return
 		}
-		logger.Logi(fmt.Sprintf("File %s already exists. Removing...", outFile))
+		logger.Logd(fmt.Sprintf("File %s already exists. Removing...", outFile))
 		if err := os.Remove(outFile); err != nil {
 			collectedErrors = append(collectedErrors, fmt.Sprintf("Error removing existing file %s: %v", outFile, err))
 			tq.showErrorBar(bar, task, "error")
@@ -266,7 +266,7 @@ func (tq *TaskQueue) processVersionTask(task VersionTask) {
 		}
 
 	}
-	logger.Logs(fmt.Sprintf("Package %s downloaded successfully", task.Version.PackageName))
+	logger.Logi(fmt.Sprintf("Package %s downloaded successfully", task.Version.PackageName))
 }
 
 func (tq *TaskQueue) showErrorBar(prevBar *mpb.Bar, task Task, errorText string) {
@@ -305,12 +305,12 @@ func (tq *TaskQueue) findVersion(packageName string, versionCode int) (sources.V
 						Err:         err,
 					})
 				} else {
-					logger.Logw(fmt.Sprintf("Package %s not found at source %s", packageName, src.Name()))
+					logger.Logd(fmt.Sprintf("Package %s not found at source %s", packageName, src.Name()))
 				}
 				return
 			}
 			mu.Lock()
-			logger.Logs(fmt.Sprintf("Found package %s v%s (%v) at source %s", packageName, version.Name, version.Code, src.Name()))
+			logger.Logi(fmt.Sprintf("Found package %s v%s (%v) at source %s", packageName, version.Name, version.Code, src.Name()))
 			if version.Code > latestVersion.Code {
 				latestVersion = version
 				latestSource = src
