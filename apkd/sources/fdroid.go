@@ -113,7 +113,7 @@ func (s *FDroid) getAppInfo(data map[string]any, packageName string) (AppInfo, e
 		if strings.EqualFold(pkgName, packageName) {
 			jsonBytes, err := json.Marshal(data[pkgName])
 			if err != nil {
-				panic(err)
+				return appInfo, fmt.Errorf("error encoding package JSON: %w", err)
 			}
 			if err := json.Unmarshal(jsonBytes, &appInfo); err != nil {
 				return appInfo, fmt.Errorf("error decoding package JSON: %w", err)
@@ -134,7 +134,7 @@ func (s *FDroid) findAllPackagesByAuthor(data map[string]any, authorName string)
 			if author, ok := metadata["authorName"].(string); ok && author == authorName {
 				jsonBytes, err := json.Marshal(data[pkgName])
 				if err != nil {
-					panic(err)
+					return nil, fmt.Errorf("error encoding package JSON: %w", err)
 				}
 				var appInfo AppInfo
 				if err := json.Unmarshal(jsonBytes, &appInfo); err != nil {
