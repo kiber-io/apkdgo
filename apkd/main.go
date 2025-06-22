@@ -45,6 +45,9 @@ var rootCmd = cobra.Command{
 	Use:   "apkd",
 	Short: "apkd is a tool for downloading APKs from multiple sources",
 	PreRun: func(cmd *cobra.Command, args []string) {
+		if verbosity == 0 {
+			verbosity = 1 // default verbosity level
+		}
 		logger.Init(verbosity)
 
 		if listSources || printVersion {
