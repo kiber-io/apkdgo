@@ -26,13 +26,18 @@ build() {
     fi
 }
 
-build "windows" "amd64" "apkd-$VERSION-windows-amd64.exe"
-build "windows" "386" "apkd-$VERSION-windows-386.exe"
-build "linux" "amd64" "apkd-$VERSION-linux-amd64"
-build "linux" "arm64" "apkd-$VERSION-linux-arm64"
-build "linux" "386" "apkd-$VERSION-linux-386"
-build "darwin" "amd64" "apkd-$VERSION-darwin-amd64"
-build "darwin" "arm64" "apkd-$VERSION-darwin-arm64"
-
+if [[ "$1" == "-a" ]]; then
+    build "windows" "amd64" "apkd-$VERSION-windows-amd64.exe"
+    build "windows" "386" "apkd-$VERSION-windows-386.exe"
+    build "linux" "amd64" "apkd-$VERSION-linux-amd64"
+    build "linux" "arm64" "apkd-$VERSION-linux-arm64"
+    build "linux" "386" "apkd-$VERSION-linux-386"
+    build "darwin" "amd64" "apkd-$VERSION-darwin-amd64"
+    build "darwin" "arm64" "apkd-$VERSION-darwin-arm64"
+else
+    CUR_OS=$(go env GOOS)
+    CUR_ARCH=$(go env GOARCH)
+    build "$CUR_OS" "$CUR_ARCH" "apkd-$VERSION-$CUR_OS-$CUR_ARCH"
+fi
 
 echo "Build process completed."
