@@ -279,12 +279,25 @@ func (s *RuStore) FindByDeveloper(developerId string) ([]string, error) {
 }
 
 func (s *RuStore) ExtractApkFromZip(zipFile string) error {
-	logger.Logd(fmt.Sprintf("Extracting .apk from zip file: %s", zipFile))
 	r, err := zip.OpenReader(zipFile)
 	if err != nil {
 		return err
 	}
 	defer r.Close()
+	hasManifest := false
+	for _, f := range r.File {
+		logger.Logd(fmt.Sprintf("Checking file in zip: %s", f.Name))
+		if strings.EqualFold(f.Name, "AndroidManifest.xml") {
+			hasManifest = true
+			break
+		}
+	}
+	if hasManifest {
+		// The zip file is already an APK, no need to extract
+		logger.Logd(fmt.Sprintf("The file %s is already an APK, skipping extraction", zipFile))
+		return nil
+	}
+	logger.Logd(fmt.Sprintf("Extracting .apk from zip file: %s", zipFile))
 	parentDir := filepath.Dir(zipFile)
 	apkFilePath := filepath.Base(zipFile + ".apk")
 	outPath := filepath.Join(parentDir, apkFilePath)
