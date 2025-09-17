@@ -36,9 +36,9 @@ apkd [flags]
   ```
 
 - `--dev`:
-  Enable batch download mode for all apps from a specific developer. Example:
+  Enable batch download mode for all apps from a specific developer. You need to specify the application package from the developer whose apps should be searched and downloaded using the `-p/--package` flag. Example:
   ```bash
-  apkd --dev developer_name
+  apkd --dev --package com.example.app
   ```
 
 - `--force`, `-F`:
