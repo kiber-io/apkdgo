@@ -8,6 +8,7 @@ import (
 	"strings"
 
 	"github.com/goccy/go-json"
+	"github.com/kiber-io/apkd/apkd/network"
 )
 
 type AppMetadata struct {
@@ -50,9 +51,9 @@ func (s *FDroid) Download(version Version) (io.ReadCloser, error) {
 	if err != nil {
 		return nil, err
 	}
-	req.Header.Add("User-Agent", "F-Droid 1.21.1")
-	req.Header.Add("Accept-Encoding", "gzip")
-	req.Header.Add("accept-charset", "UTF-8")
+	// req.Header.Add("User-Agent", "F-Droid 1.21.1")
+	// req.Header.Add("Accept-Encoding", "gzip")
+	// req.Header.Add("accept-charset", "UTF-8")
 	return createResponseReader(req)
 }
 
@@ -68,11 +69,11 @@ func (s *FDroid) getJson() (map[string]any, error) {
 		return nil, err
 	}
 
-	req.Header.Add("User-Agent", "F-Droid 1.21.1")
-	req.Header.Add("Accept-Encoding", "gzip")
-	req.Header.Add("accept-charset", "UTF-8")
+	// req.Header.Add("User-Agent", "F-Droid 1.21.1")
+	// req.Header.Add("Accept-Encoding", "gzip")
+	// req.Header.Add("accept-charset", "UTF-8")
 
-	res, err := http.DefaultClient.Do(req)
+	res, err := s.Net.Do(req)
 
 	if err != nil {
 		return nil, err
@@ -229,5 +230,8 @@ func init() {
 	s := &FDroid{}
 	s.appsCache = make(map[string]map[string]any)
 	s.Source = s
+	s.Net = network.DefaultClient().WithDefaultHeaders(http.Header{
+		"User-Agent": {"F-Droid 1.23.1"},
+	})
 	Register(s)
 }
