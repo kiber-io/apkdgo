@@ -2,12 +2,15 @@ package network
 
 import (
 	"context"
+	"fmt"
 	"io"
 	"math/rand"
 	"net"
 	"net/http"
 	"slices"
 	"time"
+
+	"github.com/kiber-io/apkd/apkd/logger"
 )
 
 type Doer interface {
@@ -87,6 +90,7 @@ func (c *Client) Do(req *http.Request) (*http.Response, error) {
 		}
 
 		delay := backoffWithJitter(c.retry.Delay, c.retry.MaxDelay, attempt)
+		logger.Logw(fmt.Sprintf("Request failed (attempt %d/%d), retrying in %v: %v", attempt, c.retry.MaxAttempts, delay, lastErr))
 		select {
 		case <-time.After(delay):
 		case <-req.Context().Done():
