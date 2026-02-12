@@ -80,7 +80,7 @@ func (s *RuStore) generateDeviceId() string {
 
 func (s *RuStore) addHeaders(req *http.Request) {
 	device := devices.GetRandomDevice()
-	req.Header.Add("User-Agent", "RuStore/1.61.0.2 (Android "+device.BuildVersionRelease+"; SDK "+strconv.Itoa(device.BuildVersionSdkInt)+"; "+device.Platforms[0]+"; "+device.BuildModel+"; en)")
+	req.Header.Add("User-Agent", "RuStore/1.93.0.3 (Android "+device.BuildVersionRelease+"; SDK "+strconv.Itoa(device.BuildVersionSdkInt)+"; "+device.Platforms[0]+"; "+device.BuildModel+"; en)")
 	req.Header.Add("Connection", "Keep-Alive")
 	req.Header.Add("Accept-Encoding", "gzip")
 	req.Header.Add("deviceId", s.generateDeviceId())
@@ -91,7 +91,7 @@ func (s *RuStore) addHeaders(req *http.Request) {
 	req.Header.Add("androidSdkVer", strconv.Itoa(device.BuildVersionSdkInt))
 	req.Header.Add("firmwareVer", device.BuildVersionRelease)
 	req.Header.Add("deviceType", "mobile")
-	req.Header.Add("ruStoreVerCode", "1061002")
+	req.Header.Add("ruStoreVerCode", "1093003")
 }
 
 func (s *RuStore) getAppInfo(packageName string) (map[string]any, error) {
@@ -164,7 +164,7 @@ func (s *RuStore) getDownloadLink(appId float64) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	req.Header.Add("User-Agent", "RuStore/1.61.0.2 (Android "+device.BuildVersionRelease+"; SDK "+strconv.Itoa(device.BuildVersionSdkInt)+"; "+device.Platforms[0]+"; "+device.BuildModel+"; en)")
+	req.Header.Add("User-Agent", "RuStore/1.93.0.3 (Android "+device.BuildVersionRelease+"; SDK "+strconv.Itoa(device.BuildVersionSdkInt)+"; "+device.Platforms[0]+"; "+device.BuildModel+"; en)")
 	req.Header.Add("Connection", "Keep-Alive")
 	req.Header.Add("Accept-Encoding", "gzip")
 	req.Header.Add("deviceId", s.generateDeviceId())
@@ -175,7 +175,7 @@ func (s *RuStore) getDownloadLink(appId float64) (string, error) {
 	req.Header.Add("androidSdkVer", strconv.Itoa(device.BuildVersionSdkInt))
 	req.Header.Add("firmwareVer", device.BuildVersionRelease)
 	req.Header.Add("deviceType", "mobile")
-	req.Header.Add("ruStoreVerCode", "1061002")
+	req.Header.Add("ruStoreVerCode", "1093003")
 	req.Header.Add("Content-Type", "application/json; charset=utf-8")
 
 	res, err := http.DefaultClient.Do(req)
