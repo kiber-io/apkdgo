@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/kiber-io/apkd/apkd/logger"
+	"github.com/kiber-io/apkd/apkd/network"
 
 	"github.com/vbauerster/mpb/v8"
 )
@@ -29,6 +30,8 @@ const ctxModuleKey = contextKey("module")
 
 type BaseSource struct {
 	Source
+	Net            network.Doer
+	DefaultHeaders http.Header
 }
 
 type Error struct {
@@ -165,6 +168,13 @@ func (s *BaseSource) NewRequest(method, url string, body io.Reader) (*http.Reque
 	req = req.WithContext(ctx)
 	return req, nil
 }
+
+// func (s *BaseSource) Http() network.Doer {
+// 	if s.Net == nil {
+// 		s.Net = network.DefaultClient()
+// 	}
+// 	return s.Net
+// }
 
 func init() {
 	http.DefaultTransport = &LoggingRoundTripper{

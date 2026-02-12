@@ -17,11 +17,13 @@ import (
 
 	"github.com/kiber-io/apkd/apkd/devices"
 	"github.com/kiber-io/apkd/apkd/logger"
+	"github.com/kiber-io/apkd/apkd/network"
 )
 
 type RuStore struct {
 	BaseSource
 	appsCache map[string]map[string]any
+	device    devices.Device
 }
 
 func (s *RuStore) Name() string {
@@ -42,7 +44,6 @@ func (s *RuStore) Download(version Version) (io.ReadCloser, error) {
 	if err != nil {
 		return nil, err
 	}
-	s.addHeaders(req)
 	return createResponseReader(req)
 }
 
@@ -78,22 +79,6 @@ func (s *RuStore) generateDeviceId() string {
 	return string(b1) + "--" + string(b2)
 }
 
-func (s *RuStore) addHeaders(req *http.Request) {
-	device := devices.GetRandomDevice()
-	req.Header.Add("User-Agent", "RuStore/1.93.0.3 (Android "+device.BuildVersionRelease+"; SDK "+strconv.Itoa(device.BuildVersionSdkInt)+"; "+device.Platforms[0]+"; "+device.BuildModel+"; en)")
-	req.Header.Add("Connection", "Keep-Alive")
-	req.Header.Add("Accept-Encoding", "gzip")
-	req.Header.Add("deviceId", s.generateDeviceId())
-	req.Header.Add("deviceManufacturerName", device.BuildBrand)
-	req.Header.Add("deviceModelName", device.BuildModel)
-	req.Header.Add("deviceModel", device.BuildBrand+" "+device.BuildModel)
-	req.Header.Add("firmwareLang", "en")
-	req.Header.Add("androidSdkVer", strconv.Itoa(device.BuildVersionSdkInt))
-	req.Header.Add("firmwareVer", device.BuildVersionRelease)
-	req.Header.Add("deviceType", "mobile")
-	req.Header.Add("ruStoreVerCode", "1093003")
-}
-
 func (s *RuStore) getAppInfo(packageName string) (map[string]any, error) {
 	if appInfo, ok := s.appsCache[packageName]; ok {
 		return appInfo, nil
@@ -105,9 +90,9 @@ func (s *RuStore) getAppInfo(packageName string) (map[string]any, error) {
 	if err != nil {
 		return nil, err
 	}
-	s.addHeaders(req)
+	// s.addHeaders(req)
 
-	res, err := http.DefaultClient.Do(req)
+	res, err := s.Net.Do(req)
 
 	if err != nil {
 		return nil, err
@@ -140,7 +125,6 @@ func (s *RuStore) getAppInfo(packageName string) (map[string]any, error) {
 
 func (s *RuStore) getDownloadLink(appId float64) (string, error) {
 	url := "https://backapi.rustore.ru/applicationData/v2/download-link"
-	device := devices.GetRandomDevice()
 	payloadData := map[string]any{
 		"appId":          appId,
 		"firstInstall":   false,
@@ -150,7 +134,7 @@ func (s *RuStore) getDownloadLink(appId float64) (string, error) {
 		},
 		"screenDensity":        480,
 		"supportedLocales":     []string{"en_US", "ru_RU"},
-		"sdkVersion":           device.BuildVersionSdkInt,
+		"sdkVersion":           s.device.BuildVersionSdkInt,
 		"withoutSplits":        true,
 		"signatureFingerprint": nil,
 	}
@@ -164,21 +148,8 @@ func (s *RuStore) getDownloadLink(appId float64) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	req.Header.Add("User-Agent", "RuStore/1.93.0.3 (Android "+device.BuildVersionRelease+"; SDK "+strconv.Itoa(device.BuildVersionSdkInt)+"; "+device.Platforms[0]+"; "+device.BuildModel+"; en)")
-	req.Header.Add("Connection", "Keep-Alive")
-	req.Header.Add("Accept-Encoding", "gzip")
-	req.Header.Add("deviceId", s.generateDeviceId())
-	req.Header.Add("deviceManufacturerName", device.BuildBrand)
-	req.Header.Add("deviceModelName", device.BuildModel)
-	req.Header.Add("deviceModel", device.BuildBrand+" "+device.BuildModel)
-	req.Header.Add("firmwareLang", "en")
-	req.Header.Add("androidSdkVer", strconv.Itoa(device.BuildVersionSdkInt))
-	req.Header.Add("firmwareVer", device.BuildVersionRelease)
-	req.Header.Add("deviceType", "mobile")
-	req.Header.Add("ruStoreVerCode", "1093003")
-	req.Header.Add("Content-Type", "application/json; charset=utf-8")
 
-	res, err := http.DefaultClient.Do(req)
+	res, err := s.Net.Do(req)
 
 	if err != nil {
 		return "", err
@@ -242,7 +213,7 @@ func (s *RuStore) FindByDeveloper(developerId string) ([]string, error) {
 	if err != nil {
 		return nil, err
 	}
-	res, err := http.DefaultClient.Do(req)
+	res, err := s.Net.Do(req)
 
 	if err != nil {
 		return nil, err
@@ -335,7 +306,21 @@ func (s *RuStore) ExtractApkFromZip(zipFile string) error {
 func init() {
 	s := &RuStore{
 		appsCache: make(map[string]map[string]any),
+		device:    devices.GetRandomDevice(),
 	}
 	s.Source = s
+	s.Net = network.DefaultClient().WithDefaultHeaders(http.Header{
+		"User-Agent":             {"RuStore/1.93.0.3 (Android " + s.device.BuildVersionRelease + "; SDK " + strconv.Itoa(s.device.BuildVersionSdkInt) + "; " + s.device.Platforms[0] + "; " + s.device.BuildModel + "; ru)"},
+		"deviceId":               {s.generateDeviceId()},
+		"deviceManufacturerName": {s.device.BuildBrand},
+		"deviceModelName":        {s.device.BuildModel},
+		"deviceModel":            {s.device.BuildBrand + " " + s.device.BuildModel},
+		"firmwareLang":           {"ru"},
+		"androidSdkVer":          {strconv.Itoa(s.device.BuildVersionSdkInt)},
+		"firmwareVer":            {s.device.BuildVersionRelease},
+		"deviceType":             {"mobile"},
+		"ruStoreVerCode":         {"1093003"},
+		"Content-Type":           {"application/json; charset=utf-8"},
+	})
 	Register(s)
 }
