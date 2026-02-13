@@ -27,25 +27,25 @@ var devices = []Device{}
 var configs embed.FS
 
 type Device struct {
-	BuildBrand          string    `properties:"Build.BRAND,default="`
-	BuildVersionSdkInt  int       `properties:"Build.VERSION.SDK_INT,default=0"`
-	BuildModel          string    `properties:"Build.MODEL,default="`
-	CellOperator        int       `properties:"CellOperator,default=0"`
-	BuildFingerprint    string    `properties:"Build.FINGERPRINT,default="`
-	BuildDevice         string    `properties:"Build.DEVICE,default="`
-	BuildProduct        string    `properties:"Build.PRODUCT,default="`
-	ScreenHeight        int       `properties:"Screen.Height,default=0"`
-	ScreenWidth         int       `properties:"Screen.Width,default=0"`
-	ScreenDensity       int       `properties:"Screen.Density,default=0"`
-	Platforms           PropArray `properties:"Platforms,default=arm64-v8a,armeabi-v7a,x86,x86_64"`
-	SimOperator         int       `properties:"SimOperator,default=0"`
-	Features            PropArray `properties:"Features,default="`
-	BuildRadio          string    `properties:"Build.RADIO,default="`
-	BuildId             string    `properties:"Build.ID,default="`
-	BuildVersionRelease string    `properties:"Build.VERSION.RELEASE,default=0"`
-	BuildBootloader     string    `properties:"Build.BOOTLOADER,default="`
-	BuildManufacturer   string    `properties:"Build.MANUFACTURER,default="`
-	BuildHardware       string    `properties:"Build.HARDWARE,default="`
+	BuildBrand          string    `properties:"Build.BRAND"`
+	BuildVersionSdkInt  int       `properties:"Build.VERSION.SDK_INT"`
+	BuildModel          string    `properties:"Build.MODEL"`
+	CellOperator        int       `properties:"CellOperator"`
+	BuildFingerprint    string    `properties:"Build.FINGERPRINT"`
+	BuildDevice         string    `properties:"Build.DEVICE"`
+	BuildProduct        string    `properties:"Build.PRODUCT"`
+	ScreenHeight        int       `properties:"Screen.Height"`
+	ScreenWidth         int       `properties:"Screen.Width"`
+	ScreenDensity       int       `properties:"Screen.Density"`
+	Platforms           PropArray `properties:"Platforms"`
+	SimOperator         int       `properties:"SimOperator"`
+	Features            PropArray `properties:"Features"`
+	BuildRadio          string    `properties:"Build.RADIO"`
+	BuildId             string    `properties:"Build.ID"`
+	BuildVersionRelease string    `properties:"Build.VERSION.RELEASE"`
+	BuildBootloader     string    `properties:"Build.BOOTLOADER"`
+	BuildManufacturer   string    `properties:"Build.MANUFACTURER"`
+	BuildHardware       string    `properties:"Build.HARDWARE"`
 }
 
 func (s *Device) GenerateAndroidID() string {
