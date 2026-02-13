@@ -5,11 +5,13 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"log"
 	"math/rand"
 	"net/http"
 	"time"
 
 	"github.com/kiber-io/apkd/apkd/devices"
+	"github.com/kiber-io/apkd/apkd/network"
 
 	"golang.org/x/text/cases"
 	"golang.org/x/text/language"
@@ -34,6 +36,8 @@ type AppInfoNashStore struct {
 
 type NashStore struct {
 	BaseSource
+
+	device devices.Device
 }
 
 func (s *NashStore) Name() string {
@@ -93,39 +97,8 @@ func (s *NashStore) getAppInfo(packageName string) (AppInfoNashStore, error) {
 	if err != nil {
 		return appInfo, err
 	}
-	device := devices.GetRandomDevice()
-	caser := cases.Title(language.English)
-	deviceBrand := caser.String(device.BuildBrand)
-	req.Header.Add("User-Agent", "Nashstore [com.nashstore][0.0.6]["+deviceBrand)
-	req.Header.Add("Accept", "application/json, text/plain, */*")
-	req.Header.Add("Accept-Encoding", "gzip")
-	req.Header.Add("Content-Type", "application/json")
-	tok := s.answer42()
-	req.Header.Add("xaccesstoken", tok)
-	req.Header.Add("Cookie", "nashstore_token="+tok)
-	appHeader := map[string]any{
-		"androidId":   device.GenerateAndroidID(),
-		"apiLevel":    device.BuildVersionSdkInt,
-		"baseOs":      "",
-		"buildId":     device.BuildId,
-		"carrier":     "MTS",
-		"deviceName":  device.BuildModel,
-		"fingerprint": device.BuildFingerprint,
-		"fontScale":   1,
-		"brand":       device.BuildBrand,
-		"deviceId":    device.BuildDevice,
-		"width":       device.ScreenWidth,
-		"height":      device.ScreenHeight,
-		"scale":       2.625,
-	}
-	appHeaderBytes, err := json.Marshal(appHeader)
-	if err != nil {
-		return appInfo, err
-	}
 
-	req.Header.Add("nashstore-app", string(appHeaderBytes))
-
-	res, err := http.DefaultClient.Do(req)
+	res, err := s.Net.Do(req)
 
 	if err != nil {
 		return appInfo, err
@@ -185,44 +158,9 @@ func (s *NashStore) FindByPackage(packageName string, versionCode int) (Version,
 	return version, nil
 }
 
-func (s *NashStore) addHeaders(req *http.Request) error {
-	device := devices.GetRandomDevice()
-	caser := cases.Title(language.English)
-	deviceBrand := caser.String(device.BuildBrand)
-	req.Header.Add("User-Agent", "Nashstore [com.nashstore][0.0.6]["+deviceBrand+"]")
-	req.Header.Add("Accept", "application/json, text/plain, */*")
-	req.Header.Add("Accept-Encoding", "gzip")
-	req.Header.Add("Content-Type", "application/json")
-	req.Header.Add("xaccesstoken", s.answer42())
-	appHeader := map[string]any{
-		"androidId":   device.GenerateAndroidID(),
-		"apiLevel":    device.BuildVersionSdkInt,
-		"baseOs":      "",
-		"buildId":     device.BuildId,
-		"carrier":     "T-Mobile",
-		"deviceName":  device.BuildModel,
-		"fingerprint": device.BuildFingerprint,
-		"fontScale":   1,
-		"brand":       device.BuildBrand,
-		"deviceId":    device.BuildDevice,
-		"width":       device.ScreenWidth,
-		"height":      device.ScreenHeight,
-		"scale":       2.625,
-	}
-	appHeaderBytes, err := json.Marshal(appHeader)
-	if err != nil {
-		return err
-	}
-	req.Header.Add("nashstore-app", string(appHeaderBytes))
-	return nil
-}
-
 func (s *NashStore) Download(version Version) (io.ReadCloser, error) {
 	req, err := s.NewRequest("GET", version.Link, nil)
 	if err != nil {
-		return nil, err
-	}
-	if err := s.addHeaders(req); err != nil {
 		return nil, err
 	}
 	return createResponseReader(req)
@@ -240,11 +178,8 @@ func (s *NashStore) FindByDeveloper(developerId string) ([]string, error) {
 	if err != nil {
 		return nil, err
 	}
-	if err := s.addHeaders(req); err != nil {
-		return nil, err
-	}
 
-	res, err := http.DefaultClient.Do(req)
+	res, err := s.Net.Do(req)
 
 	if err != nil {
 		return nil, err
@@ -289,7 +224,36 @@ func (s *NashStore) FindByDeveloper(developerId string) ([]string, error) {
 }
 
 func init() {
-	s := &NashStore{}
+	s := &NashStore{
+		device: devices.GetRandomDevice(),
+	}
 	s.Source = s
+	tok := s.answer42()
+	appHeader := map[string]any{
+		"androidId":   s.device.GenerateAndroidID(),
+		"apiLevel":    s.device.BuildVersionSdkInt,
+		"baseOs":      "",
+		"buildId":     s.device.BuildId,
+		"carrier":     "MTS",
+		"deviceName":  s.device.BuildModel,
+		"fingerprint": s.device.BuildFingerprint,
+		"fontScale":   1,
+		"brand":       s.device.BuildBrand,
+		"deviceId":    s.device.BuildDevice,
+		"width":       s.device.ScreenWidth,
+		"height":      s.device.ScreenHeight,
+		"scale":       2.625,
+	}
+	appHeaderBytes, err := json.Marshal(appHeader)
+	if err != nil {
+		log.Fatalf("failed to marshal app header: %v", err)
+	}
+	s.Net = network.DefaultClient().WithDefaultHeaders(http.Header{
+		"User-Agent":    {"Nashstore [com.nashstore][0.0.6][" + cases.Title(language.English).String(s.device.BuildBrand) + "]"},
+		"Content-Type":  {"application/json"},
+		"xaccesstoken":  {tok},
+		"Cookie":        {"nashstore_token=" + tok},
+		"nashstore-app": {string(appHeaderBytes)},
+	})
 	Register(s)
 }

@@ -8,9 +8,8 @@ import (
 	"net/http"
 	"os"
 	"strings"
-	"time"
 
-	"github.com/kiber-io/apkd/apkd/logger"
+	"github.com/kiber-io/apkd/apkd/network"
 
 	"github.com/vbauerster/mpb/v8"
 )
@@ -29,6 +28,8 @@ const ctxModuleKey = contextKey("module")
 
 type BaseSource struct {
 	Source
+	Net            network.Doer
+	DefaultHeaders http.Header
 }
 
 type Error struct {
@@ -134,40 +135,18 @@ func createResponseReader(req *http.Request) (io.ReadCloser, error) {
 	return resp.Body, nil
 }
 
-type LoggingRoundTripper struct {
-	original http.RoundTripper
-}
-
-func (lrt *LoggingRoundTripper) RoundTrip(req *http.Request) (*http.Response, error) {
-	moduleName := "unknown"
-	if val := req.Context().Value(ctxModuleKey); val != nil {
-		moduleName = val.(string)
-	}
-	requestID := fmt.Sprintf("%s-%d", moduleName, time.Now().UnixNano())
-	logger.Logd(fmt.Sprintf("[req %s] Request URL: %s", requestID, req.URL.String()))
-
-	resp, err := lrt.original.RoundTrip(req)
-	if err != nil {
-		return resp, err
-	}
-
-	logger.Logd(fmt.Sprintf("[req %s] Response Status: %s", requestID, resp.Status))
-
-	return resp, nil
-}
-
 func (s *BaseSource) NewRequest(method, url string, body io.Reader) (*http.Request, error) {
-	req, err := http.NewRequest(method, url, body)
+	ctx := context.WithValue(context.Background(), ctxModuleKey, s.Source.Name())
+	req, err := http.NewRequestWithContext(ctx, method, url, body)
 	if err != nil {
 		return nil, err
 	}
-	ctx := context.WithValue(context.Background(), ctxModuleKey, s.Source.Name())
-	req = req.WithContext(ctx)
 	return req, nil
 }
 
-func init() {
-	http.DefaultTransport = &LoggingRoundTripper{
-		original: http.DefaultTransport,
+func (s *BaseSource) Http() network.Doer {
+	if s.Net == nil {
+		s.Net = network.DefaultClient()
 	}
+	return s.Net
 }
