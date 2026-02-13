@@ -241,27 +241,57 @@ func (tq *TaskQueue) processVersionTask(task VersionTask) {
 		return
 	}
 	progressReader := bar.ProxyReader(reader)
-	defer progressReader.Close()
-	file, err := os.Create(outFile)
-	if err != nil {
-		collectedErrors = append(collectedErrors, fmt.Sprintf("Error creating file %s: %v", outFile, err))
-		tq.showErrorBar(bar, task, "error")
-		return
+	progressReaderClosed := false
+	defer func() {
+		if progressReaderClosed {
+			return
+		}
+		if closeErr := progressReader.Close(); closeErr != nil {
+			logger.Loge(fmt.Sprintf("Error closing download stream for package %s: %v", task.Version.PackageName, closeErr))
+		}
+	}()
+	source, isRuStore := task.Source.(*sources.RuStore)
+	downloadPath := outFile
+	if isRuStore {
+		downloadPath = outFile + ".download"
+		if err := os.Remove(downloadPath); err != nil && !os.IsNotExist(err) {
+			collectedErrors = append(collectedErrors, fmt.Sprintf("Error removing existing temporary file %s: %v", downloadPath, err))
+			tq.showErrorBar(bar, task, "error")
+			return
+		}
 	}
-	defer file.Close()
 
-	if _, err = io.Copy(file, progressReader); err != nil {
-		collectedErrors = append(collectedErrors, fmt.Sprintf("Error saving file %s: %v", outFile, err))
+	file, err := os.Create(downloadPath)
+	if err != nil {
+		collectedErrors = append(collectedErrors, fmt.Sprintf("Error creating file %s: %v", downloadPath, err))
 		tq.showErrorBar(bar, task, "error")
 		return
 	}
-	source, ok := task.Source.(*sources.RuStore)
-	if ok {
-		file.Close()
-		// workaround for rustore: it's respond with zip file in which apk is stored
-		err := source.ExtractApkFromZip(outFile)
+	if _, err = io.Copy(file, progressReader); err != nil {
+		if closeErr := file.Close(); closeErr != nil {
+			collectedErrors = append(collectedErrors, fmt.Sprintf("Error closing file %s after write error: %v", downloadPath, closeErr))
+		}
+		collectedErrors = append(collectedErrors, fmt.Sprintf("Error saving file %s: %v", downloadPath, err))
+		tq.showErrorBar(bar, task, "error")
+		return
+	}
+	if err := file.Close(); err != nil {
+		collectedErrors = append(collectedErrors, fmt.Sprintf("Error closing file %s: %v", downloadPath, err))
+		tq.showErrorBar(bar, task, "error")
+		return
+	}
+	if err := progressReader.Close(); err != nil {
+		collectedErrors = append(collectedErrors, fmt.Sprintf("Error closing download stream for package %s: %v", task.Version.PackageName, err))
+		tq.showErrorBar(bar, task, "error")
+		return
+	}
+	progressReaderClosed = true
+	if isRuStore {
+		// workaround for rustore: sometimes it responds with a zip file in which the APK is stored
+		err := source.ExtractApkFromZip(downloadPath, outFile)
 		if err != nil {
-			collectedErrors = append(collectedErrors, fmt.Sprintf("Error extracting APK from zip file %s: %v", outFile, err))
+			collectedErrors = append(collectedErrors, fmt.Sprintf("Error extracting APK from zip file %s: %v", downloadPath, err))
+			tq.showErrorBar(bar, task, "error")
 			return
 		}
 

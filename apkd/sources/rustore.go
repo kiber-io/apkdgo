@@ -245,57 +245,137 @@ func (s *RuStore) FindByDeveloper(developerId string) ([]string, error) {
 	return packages, nil
 }
 
-func (s *RuStore) ExtractApkFromZip(zipFile string) error {
+func replaceFileSafely(srcFile, dstFile string) error {
+	if srcFile == dstFile {
+		return nil
+	}
+
+	if err := os.Rename(srcFile, dstFile); err == nil {
+		return nil
+	}
+
+	backupFile := dstFile + ".bak"
+	backupCreated := false
+	if err := os.Rename(dstFile, backupFile); err != nil && !os.IsNotExist(err) {
+		return fmt.Errorf("failed to backup destination file %s: %w", dstFile, err)
+	} else if err == nil {
+		backupCreated = true
+	}
+
+	if err := os.Rename(srcFile, dstFile); err != nil {
+		if backupCreated {
+			_ = os.Rename(backupFile, dstFile)
+		}
+		return fmt.Errorf("failed to replace %s with %s: %w", dstFile, srcFile, err)
+	}
+
+	if backupCreated {
+		_ = os.Remove(backupFile)
+	}
+	return nil
+}
+
+func (s *RuStore) ExtractApkFromZip(zipFile string, outFile string) (retErr error) {
 	r, err := zip.OpenReader(zipFile)
 	if err != nil {
 		return err
 	}
-	defer r.Close()
+	defer func() {
+		if closeErr := r.Close(); closeErr != nil {
+			retErr = errors.Join(retErr, fmt.Errorf("failed to close zip reader for %s: %w", zipFile, closeErr))
+		}
+	}()
+
+	if len(r.File) == 0 {
+		return fmt.Errorf("zip archive %s is empty", zipFile)
+	}
+
 	hasManifest := false
+	var apkFile *zip.File
 	for _, f := range r.File {
 		logger.Logd(fmt.Sprintf("Checking file in zip: %s", f.Name))
-		if strings.EqualFold(f.Name, "AndroidManifest.xml") {
+		if f.FileInfo().IsDir() {
+			continue
+		}
+		baseName := filepath.Base(f.Name)
+		if strings.EqualFold(baseName, "AndroidManifest.xml") {
 			hasManifest = true
 			break
 		}
+		if apkFile == nil && strings.EqualFold(filepath.Ext(baseName), ".apk") {
+			apkFile = f
+		}
 	}
+
 	if hasManifest {
 		// The zip file is already an APK, no need to extract
 		logger.Logd(fmt.Sprintf("The file %s is already an APK, skipping extraction", zipFile))
+		if err := replaceFileSafely(zipFile, outFile); err != nil {
+			return err
+		}
 		return nil
 	}
+
+	if apkFile == nil {
+		return fmt.Errorf("no .apk file found in archive %s", zipFile)
+	}
+
 	logger.Logd(fmt.Sprintf("Extracting .apk from zip file: %s", zipFile))
-	parentDir := filepath.Dir(zipFile)
-	apkFilePath := filepath.Base(zipFile + ".apk")
-	outPath := filepath.Join(parentDir, apkFilePath)
-
-	f := r.File[0]
-	rc, err := f.Open()
+	tmpFile, err := os.CreateTemp(filepath.Dir(outFile), filepath.Base(outFile)+".tmp-*")
 	if err != nil {
 		return err
 	}
-	defer rc.Close()
+	tmpPath := tmpFile.Name()
+	closeTmpFile := func() error {
+		if tmpFile == nil {
+			return nil
+		}
+		if closeErr := tmpFile.Close(); closeErr != nil {
+			return fmt.Errorf("failed to close temporary file %s: %w", tmpPath, closeErr)
+		}
+		tmpFile = nil
+		return nil
+	}
+	cleanupTmp := true
+	defer func() {
+		if cleanupTmp {
+			_ = os.Remove(tmpPath)
+		}
+	}()
 
-	outFile, err := os.Create(outPath)
+	rc, err := apkFile.Open()
 	if err != nil {
+		if closeErr := closeTmpFile(); closeErr != nil {
+			return errors.Join(err, closeErr)
+		}
 		return err
 	}
-	defer outFile.Close()
+	defer func() {
+		if closeErr := rc.Close(); closeErr != nil {
+			retErr = errors.Join(retErr, fmt.Errorf("failed to close archive file %s: %w", apkFile.Name, closeErr))
+		}
+	}()
 
-	_, err = io.Copy(outFile, rc)
-	if err != nil {
+	if _, err := io.Copy(tmpFile, rc); err != nil {
+		if closeErr := closeTmpFile(); closeErr != nil {
+			return errors.Join(err, closeErr)
+		}
 		return err
 	}
-	outFile.Close()
-	r.Close()
-	if err := os.Remove(zipFile); err != nil {
-		return fmt.Errorf("failed to remove zip file %s: %v", zipFile, err)
-	}
-	err = os.Rename(outPath, zipFile)
-	if err != nil {
-		return fmt.Errorf("failed to rename extracted apk file %s to %s: %v", outPath, zipFile, err)
+	if err := closeTmpFile(); err != nil {
+		return err
 	}
 
+	if err := replaceFileSafely(tmpPath, outFile); err != nil {
+		return err
+	}
+	cleanupTmp = false
+
+	if zipFile != outFile {
+		if err := os.Remove(zipFile); err != nil {
+			return fmt.Errorf("failed to remove zip file %s: %w", zipFile, err)
+		}
+	}
 	return nil
 }
 
