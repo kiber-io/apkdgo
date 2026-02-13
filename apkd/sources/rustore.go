@@ -90,9 +90,8 @@ func (s *RuStore) getAppInfo(packageName string) (map[string]any, error) {
 	if err != nil {
 		return nil, err
 	}
-	// s.addHeaders(req)
 
-	res, err := s.Net.Do(req)
+	res, err := s.Http().Do(req)
 
 	if err != nil {
 		return nil, err
@@ -126,12 +125,10 @@ func (s *RuStore) getAppInfo(packageName string) (map[string]any, error) {
 func (s *RuStore) getDownloadLink(appId float64) (string, error) {
 	url := "https://backapi.rustore.ru/applicationData/v2/download-link"
 	payloadData := map[string]any{
-		"appId":          appId,
-		"firstInstall":   false,
-		"mobileServices": []string{"GMS"},
-		"supportedAbis": []string{
-			"arm64-v8a", "armeabi-v7a", "x86_64", "x86",
-		},
+		"appId":                appId,
+		"firstInstall":         true,
+		"mobileServices":       []string{"GMS"},
+		"supportedAbis":        s.device.Platforms,
 		"screenDensity":        480,
 		"supportedLocales":     []string{"en_US", "ru_RU"},
 		"sdkVersion":           s.device.BuildVersionSdkInt,
@@ -144,27 +141,26 @@ func (s *RuStore) getDownloadLink(appId float64) (string, error) {
 	}
 	payload := bytes.NewReader(payloadBytes)
 	req, err := s.NewRequest("POST", url, payload)
+	if err != nil {
+		return "", err
+	}
+
+	resp, err := s.Http().Do(req)
 
 	if err != nil {
 		return "", err
 	}
 
-	res, err := s.Net.Do(req)
-
+	defer resp.Body.Close()
+	body, err := readBody(resp)
 	if err != nil {
 		return "", err
 	}
-
-	defer res.Body.Close()
-	body, err := readBody(res)
-	if err != nil {
-		return "", err
-	}
-	if res.StatusCode != http.StatusOK {
-		if res.StatusCode == http.StatusNotFound {
+	if resp.StatusCode != http.StatusOK {
+		if resp.StatusCode == http.StatusNotFound {
 			return "", &AppNotFoundError{PackageName: strconv.Itoa(int(appId))}
 		}
-		return "", errors.New("failed to get download link (" + strconv.Itoa(res.StatusCode) + "): " + string(body))
+		return "", errors.New("failed to get download link (" + strconv.Itoa(resp.StatusCode) + "): " + string(body))
 	}
 	var result map[string]any
 	if err := json.Unmarshal(body, &result); err != nil {
@@ -213,7 +209,7 @@ func (s *RuStore) FindByDeveloper(developerId string) ([]string, error) {
 	if err != nil {
 		return nil, err
 	}
-	res, err := s.Net.Do(req)
+	res, err := s.Http().Do(req)
 
 	if err != nil {
 		return nil, err
@@ -309,6 +305,7 @@ func init() {
 		device:    devices.GetRandomDevice(),
 	}
 	s.Source = s
+	fmt.Printf("Initialized RuStore source with device: %s %s (Android %s, SDK %d)\n", s.device.BuildBrand, s.device.BuildModel, s.device.BuildVersionRelease, s.device.BuildVersionSdkInt)
 	s.Net = network.DefaultClient().WithDefaultHeaders(http.Header{
 		"User-Agent":             {"RuStore/1.93.0.3 (Android " + s.device.BuildVersionRelease + "; SDK " + strconv.Itoa(s.device.BuildVersionSdkInt) + "; " + s.device.Platforms[0] + "; " + s.device.BuildModel + "; ru)"},
 		"deviceId":               {s.generateDeviceId()},
