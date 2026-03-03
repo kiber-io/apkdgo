@@ -280,9 +280,19 @@ func (s *RuStore) ExtractApkFromZip(zipFile string, outFile string) (retErr erro
 	if err != nil {
 		return err
 	}
-	defer func() {
+	closeZipReader := func() error {
+		if r == nil {
+			return nil
+		}
 		if closeErr := r.Close(); closeErr != nil {
-			retErr = errors.Join(retErr, fmt.Errorf("failed to close zip reader for %s: %w", zipFile, closeErr))
+			return fmt.Errorf("failed to close zip reader for %s: %w", zipFile, closeErr)
+		}
+		r = nil
+		return nil
+	}
+	defer func() {
+		if closeErr := closeZipReader(); closeErr != nil {
+			retErr = errors.Join(retErr, closeErr)
 		}
 	}()
 
@@ -310,6 +320,9 @@ func (s *RuStore) ExtractApkFromZip(zipFile string, outFile string) (retErr erro
 	if hasManifest {
 		// The zip file is already an APK, no need to extract
 		logger.Logd(fmt.Sprintf("The file %s is already an APK, skipping extraction", zipFile))
+		if err := closeZipReader(); err != nil {
+			return err
+		}
 		if err := replaceFileSafely(zipFile, outFile); err != nil {
 			return err
 		}
@@ -343,7 +356,18 @@ func (s *RuStore) ExtractApkFromZip(zipFile string, outFile string) (retErr erro
 		}
 	}()
 
-	rc, err := apkFile.Open()
+	var rc io.ReadCloser
+	closeArchiveReader := func() error {
+		if rc == nil {
+			return nil
+		}
+		if closeErr := rc.Close(); closeErr != nil {
+			return fmt.Errorf("failed to close archive file %s: %w", apkFile.Name, closeErr)
+		}
+		rc = nil
+		return nil
+	}
+	rc, err = apkFile.Open()
 	if err != nil {
 		if closeErr := closeTmpFile(); closeErr != nil {
 			return errors.Join(err, closeErr)
@@ -351,8 +375,8 @@ func (s *RuStore) ExtractApkFromZip(zipFile string, outFile string) (retErr erro
 		return err
 	}
 	defer func() {
-		if closeErr := rc.Close(); closeErr != nil {
-			retErr = errors.Join(retErr, fmt.Errorf("failed to close archive file %s: %w", apkFile.Name, closeErr))
+		if closeErr := closeArchiveReader(); closeErr != nil {
+			retErr = errors.Join(retErr, closeErr)
 		}
 	}()
 
@@ -362,7 +386,13 @@ func (s *RuStore) ExtractApkFromZip(zipFile string, outFile string) (retErr erro
 		}
 		return err
 	}
+	if err := closeArchiveReader(); err != nil {
+		return err
+	}
 	if err := closeTmpFile(); err != nil {
+		return err
+	}
+	if err := closeZipReader(); err != nil {
 		return err
 	}
 
