@@ -5,7 +5,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
-	"log"
 	"math/rand"
 	"net/http"
 	"time"
@@ -223,7 +222,7 @@ func (s *NashStore) FindByDeveloper(developerId string) ([]string, error) {
 	return packages, nil
 }
 
-func init() {
+func newNashStoreSource() (Source, error) {
 	s := &NashStore{
 		device: devices.GetRandomDevice(),
 	}
@@ -246,7 +245,7 @@ func init() {
 	}
 	appHeaderBytes, err := json.Marshal(appHeader)
 	if err != nil {
-		log.Fatalf("failed to marshal app header: %v", err)
+		return nil, fmt.Errorf("failed to marshal nashstore app header: %w", err)
 	}
 	s.Net = network.DefaultClient().WithDefaultHeaders(http.Header{
 		"User-Agent":    {"Nashstore [com.nashstore][0.0.6][" + cases.Title(language.English).String(s.device.BuildBrand) + "]"},
@@ -255,5 +254,9 @@ func init() {
 		"Cookie":        {"nashstore_token=" + tok},
 		"nashstore-app": {string(appHeaderBytes)},
 	})
-	Register(s)
+	return s, nil
+}
+
+func init() {
+	RegisterSourceFactory(newNashStoreSource)
 }

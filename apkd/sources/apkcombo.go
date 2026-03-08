@@ -286,11 +286,15 @@ func (s *ApkCombo) FindByDeveloper(developerId string) ([]string, error) {
 	return packages, err
 }
 
-func init() {
+func newApkComboSource() (Source, error) {
 	s := &ApkCombo{}
 	s.Source = s
 	s.Net = network.DefaultClient().WithDefaultHeaders(http.Header{
 		"User-Agent": {browsers.GetRandomUserAgent()},
 	})
-	Register(s)
+	return s, nil
+}
+
+func init() {
+	RegisterSourceFactory(newApkComboSource)
 }

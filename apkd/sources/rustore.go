@@ -409,13 +409,13 @@ func (s *RuStore) ExtractApkFromZip(zipFile string, outFile string) (retErr erro
 	return nil
 }
 
-func init() {
+func newRuStoreSource() (Source, error) {
 	s := &RuStore{
 		appsCache: make(map[string]map[string]any),
 		device:    devices.GetRandomDevice(),
 	}
 	s.Source = s
-	logger.Logi(fmt.Sprintf("Initialized RuStore source with device: %s %s (Android %s, SDK %d)\n", s.device.BuildBrand, s.device.BuildModel, s.device.BuildVersionRelease, s.device.BuildVersionSdkInt))
+	logger.Logi(fmt.Sprintf("Initialized RuStore source with device: %s %s (Android %s, SDK %d)", s.device.BuildBrand, s.device.BuildModel, s.device.BuildVersionRelease, s.device.BuildVersionSdkInt))
 	s.Net = network.DefaultClient().WithDefaultHeaders(http.Header{
 		"User-Agent":             {"RuStore/1.93.0.3 (Android " + s.device.BuildVersionRelease + "; SDK " + strconv.Itoa(s.device.BuildVersionSdkInt) + "; " + s.device.Platforms[0] + "; " + s.device.BuildModel + "; ru)"},
 		"deviceId":               {s.generateDeviceId()},
@@ -429,5 +429,9 @@ func init() {
 		"ruStoreVerCode":         {"1093003"},
 		"Content-Type":           {"application/json; charset=utf-8"},
 	})
-	Register(s)
+	return s, nil
+}
+
+func init() {
+	RegisterSourceFactory(newRuStoreSource)
 }

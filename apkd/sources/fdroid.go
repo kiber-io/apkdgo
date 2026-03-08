@@ -226,12 +226,16 @@ func (s *FDroid) FindByDeveloper(developerId string) ([]string, error) {
 	return packages, nil
 }
 
-func init() {
+func newFDroidSource() (Source, error) {
 	s := &FDroid{}
 	s.appsCache = make(map[string]map[string]any)
 	s.Source = s
 	s.Net = network.DefaultClient().WithDefaultHeaders(http.Header{
 		"User-Agent": {"F-Droid 1.23.1"},
 	})
-	Register(s)
+	return s, nil
+}
+
+func init() {
+	RegisterSourceFactory(newFDroidSource)
 }

@@ -6,8 +6,8 @@ import (
 	"fmt"
 	"io"
 	"net/http"
-	"os"
 	"strings"
+	"sync"
 
 	"github.com/kiber-io/apkd/apkd/network"
 
@@ -84,21 +84,52 @@ func (e *AppNotFoundError) Error() string {
 }
 
 var sources = make(map[string]Source)
+var sourceFactories []SourceFactory
 
-func Register(s Source) {
+var initializeRegisteredSourcesOnce sync.Once
+var initializeRegisteredSourcesErr error
+
+type SourceFactory func() (Source, error)
+
+func RegisterSourceFactory(factory SourceFactory) {
+	sourceFactories = append(sourceFactories, factory)
+}
+
+func InitializeRegisteredSources() error {
+	initializeRegisteredSourcesOnce.Do(func() {
+		for i, sourceFactory := range sourceFactories {
+			source, err := sourceFactory()
+			if err != nil {
+				initializeRegisteredSourcesErr = fmt.Errorf("failed to initialize source from factory #%d: %w", i+1, err)
+				return
+			}
+			if err := Register(source); err != nil {
+				initializeRegisteredSourcesErr = fmt.Errorf("failed to register source %s: %w", source.Name(), err)
+				return
+			}
+		}
+	})
+
+	return initializeRegisteredSourcesErr
+}
+
+func Register(s Source) error {
 	if _, exists := sources[s.Name()]; exists {
-		fmt.Fprintf(os.Stderr, "Source %s is already registered!\n", s.Name())
-		os.Exit(1)
+		return fmt.Errorf("source %s is already registered", s.Name())
 	}
 	if s.Name() != strings.ToLower(s.Name()) {
-		fmt.Fprintf(os.Stderr, "Source name %s should be lowercase!\n", s.Name())
-		os.Exit(1)
+		return fmt.Errorf("source name %s should be lowercase", s.Name())
 	}
 	sources[s.Name()] = s
+	return nil
 }
 
 func GetAll() map[string]Source {
-	return sources
+	registry := make(map[string]Source, len(sources))
+	for sourceName, source := range sources {
+		registry[sourceName] = source
+	}
+	return registry
 }
 
 func readBody(res *http.Response) ([]byte, error) {
