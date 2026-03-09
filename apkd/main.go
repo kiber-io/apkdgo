@@ -214,11 +214,14 @@ var rootCmd = cobra.Command{
 			if warn != nil {
 				fmt.Println("Warning:", warn)
 			}
-			if _, err := os.Stat(outputFileName); os.IsExist(err) {
+			if _, err := os.Stat(outputFileName); err == nil {
 				if !forceDownload {
 					fmt.Printf("Output file %s already exists. Use --force to overwrite.\n", outputFileName)
 					os.Exit(1)
 				}
+			} else if !os.IsNotExist(err) {
+				fmt.Printf("Error checking output file %s: %v\n", outputFileName, err)
+				os.Exit(1)
 			}
 		}
 	},
