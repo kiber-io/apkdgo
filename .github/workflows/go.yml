@@ -22,10 +22,10 @@ jobs:
         arch: [amd64, arm64]
 
     steps:
-    - name: Show GitHub context
-      env:
-        GITHUB_CONTEXT: ${{ toJson(github) }}
-      run: echo "$GITHUB_CONTEXT"
+    # - name: Show GitHub context
+    #   env:
+    #     GITHUB_CONTEXT: ${{ toJson(github) }}
+    #   run: echo "$GITHUB_CONTEXT"
 
     - uses: actions/checkout@v4
     
