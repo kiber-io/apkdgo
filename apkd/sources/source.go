@@ -155,6 +155,7 @@ func createResponseReader(httpClient network.Doer, req *http.Request) (io.ReadCl
 	if httpClient == nil {
 		httpClient = network.DefaultClient()
 	}
+	req = network.WithoutClientTimeout(req)
 	resp, err := httpClient.Do(req)
 	if err != nil {
 		return nil, err

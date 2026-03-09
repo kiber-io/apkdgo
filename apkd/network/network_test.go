@@ -17,6 +17,12 @@ func (timeoutErr) Error() string   { return "timeout" }
 func (timeoutErr) Timeout() bool   { return true }
 func (timeoutErr) Temporary() bool { return true }
 
+type roundTripFunc func(*http.Request) (*http.Response, error)
+
+func (f roundTripFunc) RoundTrip(req *http.Request) (*http.Response, error) {
+	return f(req)
+}
+
 func TestDefaultRetryDecider(t *testing.T) {
 	decider := defaultRetryDecider([]int{http.StatusTooManyRequests})
 	req, err := http.NewRequest(http.MethodGet, "https://example.com", nil)
@@ -54,6 +60,77 @@ func TestWithRequestRetryIf(t *testing.T) {
 	}
 	if got(req, nil, nil, 1, 3) != RetryNo {
 		t.Fatalf("expected custom decider result")
+	}
+}
+
+func TestWithoutClientTimeout(t *testing.T) {
+	if req := WithoutClientTimeout(nil); req != nil {
+		t.Fatalf("expected nil request to stay nil")
+	}
+
+	req, err := http.NewRequest(http.MethodGet, "https://example.com", nil)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if withoutClientTimeoutFromRequest(req) {
+		t.Fatalf("expected request without timeout override by default")
+	}
+	req = WithoutClientTimeout(req)
+	if !withoutClientTimeoutFromRequest(req) {
+		t.Fatalf("expected request timeout override to be set")
+	}
+}
+
+func TestDoWithWithoutClientTimeoutDisablesHTTPClientTimeout(t *testing.T) {
+	var sawDeadline bool
+	baseHTTPClient := &http.Client{
+		Timeout: 40 * time.Millisecond,
+		Transport: roundTripFunc(func(req *http.Request) (*http.Response, error) {
+			_, sawDeadline = req.Context().Deadline()
+			return &http.Response{
+				StatusCode: http.StatusOK,
+				Status:     "200 OK",
+				Header:     http.Header{},
+				Body:       io.NopCloser(strings.NewReader("ok")),
+				Request:    req,
+			}, nil
+		}),
+	}
+	client := &Client{
+		doer: baseHTTPClient,
+		retry: &RetryPolice{
+			MaxAttempts: 1,
+			Delay:       1,
+			MaxDelay:    1,
+		},
+	}
+
+	req, err := http.NewRequest(http.MethodGet, "https://example.com", nil)
+	if err != nil {
+		t.Fatalf("unexpected request error: %v", err)
+	}
+	resp, err := client.Do(req)
+	if err != nil {
+		t.Fatalf("unexpected request error: %v", err)
+	}
+	resp.Body.Close()
+	if !sawDeadline {
+		t.Fatalf("expected request deadline when client timeout is enabled")
+	}
+
+	sawDeadline = false
+	req, err = http.NewRequest(http.MethodGet, "https://example.com", nil)
+	if err != nil {
+		t.Fatalf("unexpected request error: %v", err)
+	}
+	req = WithoutClientTimeout(req)
+	resp, err = client.Do(req)
+	if err != nil {
+		t.Fatalf("unexpected request error with timeout override: %v", err)
+	}
+	resp.Body.Close()
+	if sawDeadline {
+		t.Fatalf("expected request deadline to be disabled by timeout override")
 	}
 }
 

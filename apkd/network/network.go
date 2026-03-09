@@ -38,6 +38,7 @@ type Doer interface {
 type retryIfCtxKey struct{}
 type requestModuleCtxKey struct{}
 type requestLoggerCtxKey struct{}
+type withoutClientTimeoutCtxKey struct{}
 
 type RetryDecision uint8
 
@@ -238,9 +239,17 @@ func (c *Client) Do(req *http.Request) (*http.Response, error) {
 		}
 		return d == RetryYes
 	}
+	effectiveDoer := c.doer
+	if withoutClientTimeoutFromRequest(req) {
+		if baseHTTPClient, ok := c.doer.(*http.Client); ok && baseHTTPClient.Timeout > 0 {
+			httpClientWithoutTimeout := *baseHTTPClient
+			httpClientWithoutTimeout.Timeout = 0
+			effectiveDoer = &httpClientWithoutTimeout
+		}
+	}
 
 	for attempt := 1; attempt <= c.retry.MaxAttempts; attempt++ {
-		resp, err := c.doer.Do(req)
+		resp, err := effectiveDoer.Do(req)
 		if err == nil {
 			activeLogger.Logd(fmt.Sprintf("%s Received response: %d %s", logContext, resp.StatusCode, http.StatusText(resp.StatusCode)))
 		} else {
@@ -287,6 +296,14 @@ func WithRequestRetryIf(req *http.Request, decider RetryDecider) *http.Request {
 	return req.WithContext(ctx)
 }
 
+func WithoutClientTimeout(req *http.Request) *http.Request {
+	if req == nil {
+		return nil
+	}
+	ctx := context.WithValue(req.Context(), withoutClientTimeoutCtxKey{}, true)
+	return req.WithContext(ctx)
+}
+
 func WithModule(ctx context.Context, module string) context.Context {
 	return context.WithValue(ctx, requestModuleCtxKey{}, module)
 }
@@ -302,6 +319,18 @@ func retryIfFromRequest(req *http.Request) RetryDecider {
 		}
 	}
 	return nil
+}
+
+func withoutClientTimeoutFromRequest(req *http.Request) bool {
+	if req == nil {
+		return false
+	}
+	if val := req.Context().Value(withoutClientTimeoutCtxKey{}); val != nil {
+		if withoutTimeout, ok := val.(bool); ok {
+			return withoutTimeout
+		}
+	}
+	return false
 }
 
 func requestModuleFromRequest(req *http.Request) string {
