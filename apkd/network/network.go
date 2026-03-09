@@ -22,9 +22,14 @@ import (
 var reqSeq uint64
 var logger = logging.Named("network")
 var proxyConfigMu sync.RWMutex
+var clientDefaultsMu sync.RWMutex
+var sourceHeadersMu sync.RWMutex
 var globalProxyURL *url.URL
 var sourceProxyURLs = map[string]*url.URL{}
 var proxyInsecureSkipVerify bool
+var defaultClientTimeout = 30 * time.Second
+var defaultRetryPolicy = DefaultRetryPolice()
+var sourceHeaderOverrides = map[string]http.Header{}
 
 func nextRequestID() uint64 {
 	n := atomic.AddUint64(&reqSeq, 1)
@@ -67,6 +72,15 @@ func DefaultRetryPolice() *RetryPolice {
 	}
 }
 
+func cloneRetryPolicy(policy *RetryPolice) *RetryPolice {
+	if policy == nil {
+		return nil
+	}
+	cloned := *policy
+	cloned.RetryStatus = append([]int(nil), policy.RetryStatus...)
+	return &cloned
+}
+
 type Client struct {
 	doer           Doer
 	retry          *RetryPolice
@@ -74,11 +88,11 @@ type Client struct {
 }
 
 func DefaultClient() *Client {
-	return NewHttpClientForSource("", 30*time.Second, DefaultRetryPolice())
+	return NewHttpClientForSource("", 0, nil)
 }
 
 func DefaultClientForSource(sourceName string) *Client {
-	return NewHttpClientForSource(sourceName, 30*time.Second, DefaultRetryPolice())
+	return NewHttpClientForSource(sourceName, 0, nil)
 }
 
 func NewHttpClient(timeout time.Duration, p *RetryPolice) *Client {
@@ -86,6 +100,12 @@ func NewHttpClient(timeout time.Duration, p *RetryPolice) *Client {
 }
 
 func NewHttpClientForSource(sourceName string, timeout time.Duration, p *RetryPolice) *Client {
+	if timeout <= 0 {
+		timeout = currentClientTimeout()
+	}
+	if p == nil {
+		p = currentRetryPolicy()
+	}
 	proxyURL := resolveProxyURL(sourceName)
 	transport := http.DefaultTransport.(*http.Transport).Clone()
 	if proxyURL != nil {
@@ -102,9 +122,6 @@ func NewHttpClientForSource(sourceName string, timeout time.Duration, p *RetryPo
 	base := &http.Client{
 		Timeout:   timeout,
 		Transport: transport,
-	}
-	if p == nil {
-		p = DefaultRetryPolice()
 	}
 	return &Client{
 		doer:  base,
@@ -133,14 +150,117 @@ func ConfigureProxies(globalProxy string, sourceProxies map[string]string, insec
 		parsedSourceProxies[normalizedSourceName] = parsedSourceProxy
 	}
 	proxyConfigMu.Lock()
-	logger.Logd(fmt.Sprintf("Configured global proxy: %v", parsedGlobalProxy))
+	if parsedGlobalProxy != nil {
+		logger.Logd(fmt.Sprintf("Configured global proxy: %v", parsedGlobalProxy))
+	}
 	globalProxyURL = parsedGlobalProxy
-	logger.Logd(fmt.Sprintf("Configured source proxies: %v", parsedSourceProxies))
+	if len(parsedSourceProxies) > 0 {
+		logger.Logd(fmt.Sprintf("Configured source proxies: %v", parsedSourceProxies))
+	}
 	sourceProxyURLs = parsedSourceProxies
-	logger.Logd(fmt.Sprintf("Configured proxy insecure skip verify: %v", insecureSkipVerify))
+	if insecureSkipVerify {
+		logger.Logd(fmt.Sprintf("Configured proxy insecure skip verify: %v", insecureSkipVerify))
+	}
 	proxyInsecureSkipVerify = insecureSkipVerify
 	proxyConfigMu.Unlock()
 	return nil
+}
+
+func ResetClientDefaults() {
+	clientDefaultsMu.Lock()
+	defaultClientTimeout = 30 * time.Second
+	defaultRetryPolicy = DefaultRetryPolice()
+	clientDefaultsMu.Unlock()
+}
+
+func ConfigureClientDefaults(timeout *time.Duration, retryPolicy *RetryPolice) error {
+	if timeout != nil && *timeout <= 0 {
+		return fmt.Errorf("timeout must be > 0")
+	}
+	if retryPolicy != nil {
+		if retryPolicy.MaxAttempts <= 0 {
+			return fmt.Errorf("retry max attempts must be > 0")
+		}
+		if retryPolicy.Delay < 0 {
+			return fmt.Errorf("retry delay must be >= 0")
+		}
+		if retryPolicy.MaxDelay < 0 {
+			return fmt.Errorf("retry max delay must be >= 0")
+		}
+		for _, retryStatusCode := range retryPolicy.RetryStatus {
+			if retryStatusCode < 100 || retryStatusCode > 599 {
+				return fmt.Errorf("invalid retry status code %d", retryStatusCode)
+			}
+		}
+	}
+
+	clientDefaultsMu.Lock()
+	if timeout != nil {
+		defaultClientTimeout = *timeout
+	}
+	if retryPolicy != nil {
+		defaultRetryPolicy = cloneRetryPolicy(retryPolicy)
+	}
+	clientDefaultsMu.Unlock()
+	return nil
+}
+
+func ConfigureSourceHeaderOverrides(sourceHeaders map[string]map[string]string) error {
+	normalized := make(map[string]http.Header, len(sourceHeaders))
+	for sourceName, headers := range sourceHeaders {
+		normalizedSourceName := strings.ToLower(strings.TrimSpace(sourceName))
+		if normalizedSourceName == "" {
+			return fmt.Errorf("source name cannot be empty in source header map")
+		}
+		normalizedHeaders := make(http.Header, len(headers))
+		for headerName, headerValue := range headers {
+			normalizedHeaderName := http.CanonicalHeaderKey(strings.TrimSpace(headerName))
+			if normalizedHeaderName == "" {
+				return fmt.Errorf("header name cannot be empty for source %s", normalizedSourceName)
+			}
+			normalizedHeaders.Set(normalizedHeaderName, strings.TrimSpace(headerValue))
+		}
+		normalized[normalizedSourceName] = normalizedHeaders
+	}
+
+	sourceHeadersMu.Lock()
+	sourceHeaderOverrides = normalized
+	sourceHeadersMu.Unlock()
+	return nil
+}
+
+func ApplySourceHeaderOverrides(sourceName string, baseHeaders http.Header) http.Header {
+	resolvedHeaders := make(http.Header, len(baseHeaders))
+	for headerName, values := range baseHeaders {
+		resolvedHeaders[headerName] = append([]string(nil), values...)
+	}
+	normalizedSourceName := strings.ToLower(strings.TrimSpace(sourceName))
+	if normalizedSourceName == "" {
+		return resolvedHeaders
+	}
+
+	sourceHeadersMu.RLock()
+	sourceOverrides := sourceHeaderOverrides[normalizedSourceName]
+	sourceHeadersMu.RUnlock()
+	if len(sourceOverrides) == 0 {
+		return resolvedHeaders
+	}
+	for headerName, values := range sourceOverrides {
+		resolvedHeaders[headerName] = append([]string(nil), values...)
+	}
+	return resolvedHeaders
+}
+
+func currentClientTimeout() time.Duration {
+	clientDefaultsMu.RLock()
+	defer clientDefaultsMu.RUnlock()
+	return defaultClientTimeout
+}
+
+func currentRetryPolicy() *RetryPolice {
+	clientDefaultsMu.RLock()
+	defer clientDefaultsMu.RUnlock()
+	return cloneRetryPolicy(defaultRetryPolicy)
 }
 
 func parseProxyURL(rawProxyURL string) (*url.URL, error) {

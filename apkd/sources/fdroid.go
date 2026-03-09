@@ -42,6 +42,16 @@ type FDroid struct {
 	jsonCache map[string]any
 }
 
+type FDroidProfile struct {
+	AppVersion string `yaml:"appVersion"`
+}
+
+func defaultFDroidProfile() FDroidProfile {
+	return FDroidProfile{
+		AppVersion: "1.23.1",
+	}
+}
+
 func (s *FDroid) Name() string {
 	return "fdroid"
 }
@@ -230,12 +240,34 @@ func newFDroidSource() (Source, error) {
 	s := &FDroid{}
 	s.appsCache = make(map[string]map[string]any)
 	s.Source = s
-	s.Net = network.DefaultClientForSource(s.Name()).WithDefaultHeaders(http.Header{
-		"User-Agent": {"F-Droid 1.23.1"},
+	profile, err := ResolveSourceProfile(s.Name(), defaultFDroidProfile())
+	if err != nil {
+		return nil, err
+	}
+	s.Log().Logd(fmt.Sprintf("Using profile: %+v", profile))
+	headers := network.ApplySourceHeaderOverrides(s.Name(), http.Header{
+		"User-Agent": {"F-Droid " + profile.AppVersion},
 	})
+	s.Net = network.DefaultClientForSource(s.Name()).WithDefaultHeaders(headers)
 	return s, nil
 }
 
 func init() {
-	RegisterSourceFactory(newFDroidSource)
+	RegisterSourceFactoryWithProfile(newFDroidSource, "fdroid",
+		NewProfileDecoderWithDefaults(
+			defaultFDroidProfile(),
+			func(p *FDroidProfile) {
+				p.AppVersion = strings.TrimSpace(p.AppVersion)
+			},
+			func(p FDroidProfile) error {
+				if strings.TrimSpace(p.AppVersion) == "" {
+					return fmt.Errorf("appVersion cannot be empty")
+				}
+				if !appVersionRegexp.MatchString(p.AppVersion) {
+					return fmt.Errorf("appVersion %q is invalid", p.AppVersion)
+				}
+				return nil
+			},
+		),
+	)
 }

@@ -7,6 +7,7 @@ require (
 	github.com/spf13/cobra v1.8.1
 	github.com/vbauerster/mpb/v8 v8.9.3
 	golang.org/x/text v0.25.0
+	gopkg.in/yaml.v3 v3.0.1
 )
 
 require golang.org/x/exp v0.0.0-20250106191152-7588d65b2ba8 // indirect

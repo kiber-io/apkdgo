@@ -6,9 +6,11 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"regexp"
 	"strings"
 	"sync"
 
+	"github.com/kiber-io/apkd/apkd/logging"
 	"github.com/kiber-io/apkd/apkd/network"
 
 	"github.com/vbauerster/mpb/v8"
@@ -41,6 +43,17 @@ func (s *BaseSource) MaxParallelsDownloads() int {
 
 func (s *BaseSource) FindByDeveloper(developerId string) ([]string, error) {
 	return []string{}, nil
+}
+
+func (s *BaseSource) Log() *logging.Logger {
+	loggerName := "sources"
+	if s.Source != nil {
+		sourceName := strings.ToLower(strings.TrimSpace(s.Source.Name()))
+		if sourceName != "" {
+			loggerName = loggerName + "." + sourceName
+		}
+	}
+	return logging.Named(loggerName)
 }
 
 type FileType string
@@ -85,10 +98,19 @@ var sourceFactories []SourceFactory
 var initializeRegisteredSourcesOnce sync.Once
 var initializeRegisteredSourcesErr error
 
+var appVersionRegexp = regexp.MustCompile(`^\d+(\.\d+)*$`)
+
 type SourceFactory func() (Source, error)
 
 func RegisterSourceFactory(factory SourceFactory) {
 	sourceFactories = append(sourceFactories, factory)
+}
+
+func RegisterSourceFactoryWithProfile(factory SourceFactory, sourceName string, profileDecoder ProfileDecoder) {
+	RegisterSourceFactory(factory)
+	if profileDecoder != nil {
+		RegisterSourceProfileDecoder(sourceName, profileDecoder)
+	}
 }
 
 func InitializeRegisteredSources() error {

@@ -215,9 +215,10 @@ func (s *ApkCombo) FindByPackage(packageName string, versionCode int) (Version, 
 			return true
 		}
 		fileTypeText := strings.TrimSpace(fileTypeBlock.Text())
-		if fileTypeText == "APK" {
+		switch fileTypeText {
+		case "APK":
 			fileType = APK
-		} else if fileTypeText == "XAPK" {
+		case "XAPK":
 			fileType = XAPK
 		}
 		if fileType == "" {
@@ -294,9 +295,11 @@ func newApkComboSource() (Source, error) {
 		return nil, fmt.Errorf("failed to create fake user agent: %v", err)
 	}
 	randomUA := ua.Filter().Platform(fakeUserAgent.Desktop).Browser(fakeUserAgent.Firefox, fakeUserAgent.Chrome).Get()
-	s.Net = network.DefaultClientForSource(s.Name()).WithDefaultHeaders(http.Header{
+	s.Log().Logd(fmt.Sprintf("Using User-Agent: %s", randomUA))
+	headers := network.ApplySourceHeaderOverrides(s.Name(), http.Header{
 		"User-Agent": {randomUA},
 	})
+	s.Net = network.DefaultClientForSource(s.Name()).WithDefaultHeaders(headers)
 	return s, nil
 }
 
