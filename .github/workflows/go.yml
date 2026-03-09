@@ -18,19 +18,17 @@ jobs:
       matrix:
         go: ["1.25.x"]
         target: [1]
-        include:
-          - os: linux
-            arch: amd64
-            run_tests: true
-          - os: linux
-            arch: arm64
-            run_tests: false
-          - os: windows
-            arch: amd64
-            run_tests: false
+        os: [linux, windows]
+        arch: [amd64, arm64]
 
-    steps:
+    steps:      
     - uses: actions/checkout@v4
+
+    - name: Show matrix
+      run: |
+        echo "os=${{ matrix.os }}"
+        echo "arch=${{ matrix.arch }}"
+        echo "go=${{ matrix.go }}"
 
     - name: Set up Go
       uses: actions/setup-go@v5
@@ -39,7 +37,7 @@ jobs:
         cache: true
 
     - name: Test (linux/amd64 only)
-      if: ${{ matrix.run_tests }}
+      if: ${{ matrix.os == 'linux' && matrix.arch == 'amd64' }}
       run: go test -v ./apkd
 
     - name: Build
