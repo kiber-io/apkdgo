@@ -3,8 +3,12 @@ package network
 import (
 	"context"
 	"io"
+	"net"
 	"net/http"
+	"net/url"
+	"os"
 	"strings"
+	"syscall"
 	"testing"
 	"time"
 
@@ -32,6 +36,21 @@ func TestDefaultRetryDecider(t *testing.T) {
 
 	if got := decider(req, nil, timeoutErr{}, 1, 3); got != RetryYes {
 		t.Fatalf("expected RetryYes on timeout error, got %v", got)
+	}
+	unreachableErr := &url.Error{
+		Op:  "Get",
+		URL: "https://example.com",
+		Err: &net.OpError{
+			Op:  "dial",
+			Net: "tcp",
+			Err: &os.SyscallError{
+				Syscall: "connect",
+				Err:     syscall.ENETUNREACH,
+			},
+		},
+	}
+	if got := decider(req, nil, unreachableErr, 1, 3); got != RetryYes {
+		t.Fatalf("expected RetryYes on network unreachable error, got %v", got)
 	}
 	if got := decider(req, &http.Response{StatusCode: http.StatusTooManyRequests}, nil, 1, 3); got != RetryYes {
 		t.Fatalf("expected RetryYes on retry status, got %v", got)

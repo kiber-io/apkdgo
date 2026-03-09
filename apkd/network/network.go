@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"crypto/tls"
+	"errors"
 	"fmt"
 	"io"
 	"math/rand"
@@ -14,6 +15,7 @@ import (
 	"strings"
 	"sync"
 	"sync/atomic"
+	"syscall"
 	"time"
 
 	"github.com/kiber-io/apkd/apkd/logging"
@@ -312,7 +314,7 @@ func defaultRetryDecider(retryStatuses []int) RetryDecider {
 			return RetryNo
 		}
 		if err != nil {
-			if netErr, ok := err.(net.Error); ok && netErr.Timeout() {
+			if isRetryableTransportError(err) {
 				return RetryYes
 			}
 			return RetryNo
@@ -322,6 +324,17 @@ func defaultRetryDecider(retryStatuses []int) RetryDecider {
 		}
 		return RetryNo
 	}
+}
+
+func isRetryableTransportError(err error) bool {
+	var netErr net.Error
+	if errors.As(err, &netErr) && netErr.Timeout() {
+		return true
+	}
+	if errors.Is(err, syscall.ENETUNREACH) || errors.Is(err, syscall.EHOSTUNREACH) || errors.Is(err, syscall.ENETDOWN) {
+		return true
+	}
+	return false
 }
 
 func (c *Client) Do(req *http.Request) (*http.Response, error) {
