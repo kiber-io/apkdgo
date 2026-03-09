@@ -50,7 +50,7 @@ jobs:
         output_name="apkd-${os}-${arch}${EXT}"
 
         COMMIT="${{ github.event.pull_request.head.sha }}"
-        SHORT_COMMIt="${COMMIT:0:9}"
+        SHORT_COMMIT="${COMMIT:0:9}"
         VERSION="dev-${SHORT_COMMIT}"
 
         BUILD_DATE="$(date -u +'%Y-%m-%dT%H:%M:%SZ')"
