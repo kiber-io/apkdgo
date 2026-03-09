@@ -49,11 +49,17 @@ jobs:
           EXT=".exe"
         fi
 
+        OUT="dist/apkd-${{ matrix.os }}-${{ matrix.arch }}${EXT}"
+
         GOOS=${{ matrix.os }} GOARCH=${{ matrix.arch }} \
-          go build -v -o "dist/apkd-${{ matrix.os }}-${{ matrix.arch }}${EXT}" ./apkd
+          go build -v -o "${OUT}" ./apkd
+
+        ls -la dist
+        file "${OUT}" | true
 
     - name: Upload artifact
       uses: actions/upload-artifact@v4
       with:
         name: apkd-${{ matrix.os }}-${{ matrix.arch }}
-        path: dist/*
+        path: dist/apkd-${{ matrix.os }}-${{ matrix.arch }}*
+        if-no-files-found: error
