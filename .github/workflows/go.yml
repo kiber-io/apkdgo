@@ -55,7 +55,7 @@ jobs:
           go build -v -o "${OUT}" ./apkd
 
         ls -la dist
-        file "${OUT}" | true
+        file "${OUT}" || true
 
     - name: Upload artifact
       uses: actions/upload-artifact@v4
