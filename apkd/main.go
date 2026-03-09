@@ -6,6 +6,7 @@ import (
 	"os/signal"
 	"path/filepath"
 	"regexp"
+	"sort"
 	"strconv"
 	"strings"
 	"sync/atomic"
@@ -14,8 +15,6 @@ import (
 	"github.com/kiber-io/apkd/apkd/logging"
 	"github.com/kiber-io/apkd/apkd/network"
 	"github.com/kiber-io/apkd/apkd/sources"
-
-	"slices"
 
 	"github.com/spf13/cobra"
 )
@@ -54,6 +53,9 @@ var rootCmd = cobra.Command{
 			verbosity = 1 // default verbosity level
 		}
 		logging.Init(verbosity)
+		// Reset mutable global state to keep repeated in-process runs deterministic.
+		packageNamesMap = make(map[string]int)
+		activeSources = nil
 		if printVersion {
 			return
 		}
@@ -123,9 +125,17 @@ var rootCmd = cobra.Command{
 			selectedSources[i] = strings.ToLower(src)
 		}
 		allSources := sources.GetAll()
+		if err := validateKnownSources(selectedSources, sourceProxies, allSources); err != nil {
+			fmt.Printf("Error validating source names: %v\n", err)
+			os.Exit(1)
+		}
 		if len(selectedSources) > 0 {
+			selectedSourcesSet := make(map[string]struct{}, len(selectedSources))
+			for _, src := range selectedSources {
+				selectedSourcesSet[src] = struct{}{}
+			}
 			for src := range allSources {
-				if slices.Contains(selectedSources, src) {
+				if _, exists := selectedSourcesSet[src]; exists {
 					activeSources = append(activeSources, allSources[src])
 				}
 			}
@@ -247,6 +257,45 @@ func parseSourceProxyEntries(entries []string) (map[string]string, error) {
 		result[sourceName] = proxyURL
 	}
 	return result, nil
+}
+
+func validateKnownSources(selectedSources []string, sourceProxies map[string]string, allSources map[string]sources.Source) error {
+	knownSources := make(map[string]struct{}, len(allSources))
+	for sourceName := range allSources {
+		knownSources[sourceName] = struct{}{}
+	}
+	unknownSelected := make(map[string]struct{})
+	for _, sourceName := range selectedSources {
+		if _, exists := knownSources[sourceName]; !exists {
+			unknownSelected[sourceName] = struct{}{}
+		}
+	}
+	unknownSourceProxies := make(map[string]struct{})
+	for sourceName := range sourceProxies {
+		if _, exists := knownSources[sourceName]; !exists {
+			unknownSourceProxies[sourceName] = struct{}{}
+		}
+	}
+	if len(unknownSelected) == 0 && len(unknownSourceProxies) == 0 {
+		return nil
+	}
+	parts := make([]string, 0, 2)
+	if len(unknownSelected) > 0 {
+		parts = append(parts, fmt.Sprintf("--source: %s", joinSortedSet(unknownSelected)))
+	}
+	if len(unknownSourceProxies) > 0 {
+		parts = append(parts, fmt.Sprintf("--source-proxy: %s", joinSortedSet(unknownSourceProxies)))
+	}
+	return fmt.Errorf("unknown source name(s) in %s. Use --list-sources to see available sources", strings.Join(parts, "; "))
+}
+
+func joinSortedSet(values map[string]struct{}) string {
+	sortedValues := make([]string, 0, len(values))
+	for value := range values {
+		sortedValues = append(sortedValues, value)
+	}
+	sort.Strings(sortedValues)
+	return strings.Join(sortedValues, ", ")
 }
 
 func main() {
