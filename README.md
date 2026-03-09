@@ -1,4 +1,5 @@
 # APK Downloader CLI
+[![Go](https://github.com/kiber-io/apkdgo/actions/workflows/go.yml/badge.svg)](https://github.com/kiber-io/apkdgo/actions/workflows/go.yml)
 
 This project is a command-line tool for downloading APK files from various sources.
 
