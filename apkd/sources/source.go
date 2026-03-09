@@ -22,10 +22,6 @@ type Source interface {
 	Download(version Version) (io.ReadCloser, error)
 }
 
-type contextKey string
-
-const ctxModuleKey = contextKey("module")
-
 type BaseSource struct {
 	Source
 	Net            network.Doer
@@ -167,7 +163,7 @@ func createResponseReader(req *http.Request) (io.ReadCloser, error) {
 }
 
 func (s *BaseSource) NewRequest(method, url string, body io.Reader) (*http.Request, error) {
-	ctx := context.WithValue(context.Background(), ctxModuleKey, s.Source.Name())
+	ctx := network.WithModule(context.Background(), s.Source.Name())
 	req, err := http.NewRequestWithContext(ctx, method, url, body)
 	if err != nil {
 		return nil, err

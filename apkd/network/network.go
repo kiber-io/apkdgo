@@ -28,6 +28,8 @@ type Doer interface {
 }
 
 type retryIfCtxKey struct{}
+type requestModuleCtxKey struct{}
+type requestLoggerCtxKey struct{}
 
 type RetryDecision uint8
 
@@ -110,6 +112,16 @@ func defaultRetryDecider(retryStatuses []int) RetryDecider {
 func (c *Client) Do(req *http.Request) (*http.Response, error) {
 	var lastErr error
 	reqId := nextRequestID()
+	module := requestModuleFromRequest(req)
+	reqLogger := requestLoggerFromRequest(req)
+	activeLogger := logger
+	if reqLogger != nil {
+		activeLogger = reqLogger
+	}
+	logPrefix := fmt.Sprintf("[%s]", reqId)
+	if module != "" {
+		logPrefix = fmt.Sprintf("[%s]%s", module, logPrefix)
+	}
 	if c.defaultHeaders != nil {
 		for key, values := range c.defaultHeaders {
 			for _, value := range values {
@@ -117,7 +129,7 @@ func (c *Client) Do(req *http.Request) (*http.Response, error) {
 			}
 		}
 	}
-	logger.Logd(fmt.Sprintf("[%s] Sending request: %s %s", reqId, req.Method, req.URL.String()))
+	activeLogger.Logd(fmt.Sprintf("%s Sending request: %s %s", logPrefix, req.Method, req.URL.String()))
 	defDecider := defaultRetryDecider(c.retry.RetryStatus)
 	decider := c.retry.RetryIf
 	if reqDecider := retryIfFromRequest(req); reqDecider != nil {
@@ -139,9 +151,9 @@ func (c *Client) Do(req *http.Request) (*http.Response, error) {
 	for attempt := 1; attempt <= c.retry.MaxAttempts; attempt++ {
 		resp, err := c.doer.Do(req)
 		if err == nil {
-			logger.Logd(fmt.Sprintf("[%s] Received response: %d %s", reqId, resp.StatusCode, http.StatusText(resp.StatusCode)))
+			activeLogger.Logd(fmt.Sprintf("%s Received response: %d %s", logPrefix, resp.StatusCode, http.StatusText(resp.StatusCode)))
 		} else {
-			logger.Logd(fmt.Sprintf("[%s] Request error: %v", reqId, err))
+			activeLogger.Logd(fmt.Sprintf("%s Request error: %v", logPrefix, err))
 		}
 		if !shouldRetry(resp, err, attempt) {
 			if err != nil {
@@ -160,7 +172,7 @@ func (c *Client) Do(req *http.Request) (*http.Response, error) {
 		}
 
 		delay := backoffWithJitter(c.retry.Delay, c.retry.MaxDelay, attempt)
-		logger.Logw(fmt.Sprintf("[%s] Attempt %d/%d failed with %s, retrying in %v...", reqId, attempt, c.retry.MaxAttempts, reason, delay))
+		activeLogger.Logw(fmt.Sprintf("%s Attempt %d/%d failed with %s, retrying in %v...", logPrefix, attempt, c.retry.MaxAttempts, reason, delay))
 		select {
 		case <-time.After(delay):
 		case <-req.Context().Done():
@@ -184,10 +196,42 @@ func WithRequestRetryIf(req *http.Request, decider RetryDecider) *http.Request {
 	return req.WithContext(ctx)
 }
 
+func WithModule(ctx context.Context, module string) context.Context {
+	return context.WithValue(ctx, requestModuleCtxKey{}, module)
+}
+
+func WithLogger(ctx context.Context, reqLogger *logging.Logger) context.Context {
+	return context.WithValue(ctx, requestLoggerCtxKey{}, reqLogger)
+}
+
 func retryIfFromRequest(req *http.Request) RetryDecider {
 	if val := req.Context().Value(retryIfCtxKey{}); val != nil {
 		if decider, ok := val.(RetryDecider); ok {
 			return decider
+		}
+	}
+	return nil
+}
+
+func requestModuleFromRequest(req *http.Request) string {
+	if req == nil {
+		return ""
+	}
+	if val := req.Context().Value(requestModuleCtxKey{}); val != nil {
+		if module, ok := val.(string); ok {
+			return module
+		}
+	}
+	return ""
+}
+
+func requestLoggerFromRequest(req *http.Request) *logging.Logger {
+	if req == nil {
+		return nil
+	}
+	if val := req.Context().Value(requestLoggerCtxKey{}); val != nil {
+		if reqLogger, ok := val.(*logging.Logger); ok {
+			return reqLogger
 		}
 	}
 	return nil
