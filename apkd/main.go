@@ -8,6 +8,7 @@ import (
 	"regexp"
 	"strconv"
 	"strings"
+	"sync"
 	"syscall"
 
 	"github.com/kiber-io/apkd/apkd/logging"
@@ -33,6 +34,7 @@ var selectedSources []string
 var activeSources []sources.Source
 
 var collectedErrors []string
+var collectedErrorsMu sync.Mutex
 
 var (
 	version   = "dev"
@@ -199,12 +201,27 @@ var rootCmd = cobra.Command{
 }
 
 func printCollectedErrors() {
-	if len(collectedErrors) > 0 {
+	errorsSnapshot := snapshotCollectedErrors()
+	if len(errorsSnapshot) > 0 {
 		fmt.Println("\nErrors:")
-		for _, err := range collectedErrors {
+		for _, err := range errorsSnapshot {
 			fmt.Printf("- %s\n", strings.ReplaceAll(err, "\n", "\\n"))
 		}
 	}
+}
+
+func addCollectedError(errText string) {
+	collectedErrorsMu.Lock()
+	collectedErrors = append(collectedErrors, errText)
+	collectedErrorsMu.Unlock()
+}
+
+func snapshotCollectedErrors() []string {
+	collectedErrorsMu.Lock()
+	defer collectedErrorsMu.Unlock()
+	snapshot := make([]string, len(collectedErrors))
+	copy(snapshot, collectedErrors)
+	return snapshot
 }
 
 func main() {
