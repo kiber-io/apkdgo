@@ -132,8 +132,11 @@ func ConfigureProxies(globalProxy string, sourceProxies map[string]string, insec
 		parsedSourceProxies[normalizedSourceName] = parsedSourceProxy
 	}
 	proxyConfigMu.Lock()
+	logger.Logd(fmt.Sprintf("Configured global proxy: %v", parsedGlobalProxy))
 	globalProxyURL = parsedGlobalProxy
+	logger.Logd(fmt.Sprintf("Configured source proxies: %v", parsedSourceProxies))
 	sourceProxyURLs = parsedSourceProxies
+	logger.Logd(fmt.Sprintf("Configured proxy insecure skip verify: %v", insecureSkipVerify))
 	proxyInsecureSkipVerify = insecureSkipVerify
 	proxyConfigMu.Unlock()
 	return nil
