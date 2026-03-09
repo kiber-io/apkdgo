@@ -2,9 +2,12 @@ package sources
 
 import (
 	"archive/zip"
+	"io"
+	"net/http"
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"testing"
 
 	"gopkg.in/yaml.v3"
@@ -198,5 +201,58 @@ func TestDecodeRuStoreProfileUnknownField(t *testing.T) {
 	}
 	if _, err := DecodeSourceProfile("rustore", node.Content[0]); err == nil {
 		t.Fatalf("expected decode error for unknown field")
+	}
+}
+
+func TestRuStoreGetAppInfoConcurrentCacheAccess(t *testing.T) {
+	const workers = 64
+	const packageName = "com.example.app"
+	const responseBody = `{"code":"OK","body":{"appId":1,"fileSize":123,"versionName":"1.0.0","versionCode":1,"publicCompanyId":"dev"}}`
+
+	releaseResponses := make(chan struct{})
+	s := &RuStore{
+		appsCache: make(map[string]map[string]any),
+	}
+	s.Source = s
+	s.Net = doerFunc(func(req *http.Request) (*http.Response, error) {
+		<-releaseResponses
+		return &http.Response{
+			StatusCode: http.StatusOK,
+			Header:     http.Header{},
+			Body:       io.NopCloser(strings.NewReader(responseBody)),
+			Request:    req,
+		}, nil
+	})
+
+	var wg sync.WaitGroup
+	errs := make(chan error, workers)
+	for range workers {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			_, err := s.getAppInfo(packageName)
+			errs <- err
+		}()
+	}
+	close(releaseResponses)
+	wg.Wait()
+	close(errs)
+
+	for err := range errs {
+		if err != nil {
+			t.Fatalf("unexpected getAppInfo error: %v", err)
+		}
+	}
+
+	s.appsCacheMu.RLock()
+	_, exists := s.appsCache[packageName]
+	cacheLen := len(s.appsCache)
+	s.appsCacheMu.RUnlock()
+
+	if !exists {
+		t.Fatalf("expected package %q to be present in cache", packageName)
+	}
+	if cacheLen != 1 {
+		t.Fatalf("expected cache size 1, got %d", cacheLen)
 	}
 }

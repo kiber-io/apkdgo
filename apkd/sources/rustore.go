@@ -15,6 +15,7 @@ import (
 	"regexp"
 	"strconv"
 	"strings"
+	"sync"
 
 	"github.com/kiber-io/apkd/apkd/devices"
 	"github.com/kiber-io/apkd/apkd/network"
@@ -22,8 +23,9 @@ import (
 
 type RuStore struct {
 	BaseSource
-	appsCache map[string]map[string]any
-	device    devices.Device
+	appsCache   map[string]map[string]any
+	appsCacheMu sync.RWMutex
+	device      devices.Device
 }
 
 type RuStoreProfile struct {
@@ -97,7 +99,10 @@ func (s *RuStore) generateDeviceId() string {
 }
 
 func (s *RuStore) getAppInfo(packageName string) (map[string]any, error) {
-	if appInfo, ok := s.appsCache[packageName]; ok {
+	s.appsCacheMu.RLock()
+	appInfo, ok := s.appsCache[packageName]
+	s.appsCacheMu.RUnlock()
+	if ok {
 		return appInfo, nil
 	}
 	// If the app info is not in the cache, fetch it from the API
@@ -133,7 +138,16 @@ func (s *RuStore) getAppInfo(packageName string) (map[string]any, error) {
 
 	if result["code"] == "OK" {
 		appInfo := result["body"].(map[string]any)
+		s.appsCacheMu.Lock()
+		if s.appsCache == nil {
+			s.appsCache = make(map[string]map[string]any)
+		}
+		if cachedAppInfo, ok := s.appsCache[packageName]; ok {
+			s.appsCacheMu.Unlock()
+			return cachedAppInfo, nil
+		}
 		s.appsCache[packageName] = appInfo
+		s.appsCacheMu.Unlock()
 		return appInfo, nil
 	}
 	return nil, &AppNotFoundError{PackageName: packageName}
