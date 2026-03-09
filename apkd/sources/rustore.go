@@ -453,12 +453,12 @@ func newRuStoreSource() (Source, error) {
 	s.Log().Logd(fmt.Sprintf("Initialized with device: %s %s (Android %s, SDK %d)", s.device.Brand, s.device.Model, s.device.AndroidVersion, s.device.SDKInt))
 	s.Log().Logd(fmt.Sprintf("Using profile: %+v", profile))
 	headers := network.ApplySourceHeaderOverrides(s.Name(), http.Header{
-		"User-Agent":             {fmt.Sprintf("RuStore/1.93.0.3 (Android %s; SDK %d; %s; %s %s; ru)", s.device.AndroidVersion, s.device.SDKInt, s.device.CPUAbis[0], s.device.Manufacturer, s.device.Model)},
+		"User-Agent":             {fmt.Sprintf("RuStore/%s (Android %s; SDK %d; %s; %s %s; ru)", profile.AppVersion, s.device.AndroidVersion, s.device.SDKInt, s.device.CPUAbis[0], s.device.Manufacturer, s.device.Model)},
 		"deviceId":               {s.generateDeviceId()},
 		"deviceManufacturerName": {s.device.Manufacturer},
 		"deviceModelName":        {s.device.Model},
 		"deviceModel":            {s.device.Manufacturer + " " + s.device.Model},
-		"firmwareLang":           {"ru"},
+		"firmwareLang":           {profile.FirmwareLang},
 		"androidSdkVer":          {strconv.Itoa(s.device.SDKInt)},
 		"firmwareVer":            {s.device.AndroidVersion},
 		"deviceType":             {"mobile"},
