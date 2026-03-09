@@ -3,6 +3,7 @@ package sources
 import (
 	"bytes"
 	"compress/gzip"
+	"errors"
 	"io"
 	"net/http"
 	"strings"
@@ -17,6 +18,17 @@ type doerFunc func(*http.Request) (*http.Response, error)
 
 func (f doerFunc) Do(req *http.Request) (*http.Response, error) {
 	return f(req)
+}
+
+type trackingReadCloser struct {
+	io.Reader
+	closed   bool
+	closeErr error
+}
+
+func (r *trackingReadCloser) Close() error {
+	r.closed = true
+	return r.closeErr
 }
 
 func (s stubSource) MaxParallelsDownloads() int                 { return 1 }
@@ -136,12 +148,13 @@ func TestCreateResponseReader(t *testing.T) {
 }
 
 func TestCreateResponseReaderNon200(t *testing.T) {
+	body := &trackingReadCloser{Reader: strings.NewReader("")}
 	doer := doerFunc(func(req *http.Request) (*http.Response, error) {
 		return &http.Response{
 			StatusCode: http.StatusBadGateway,
 			Status:     "502 Bad Gateway",
 			Header:     http.Header{},
-			Body:       io.NopCloser(strings.NewReader("")),
+			Body:       body,
 			Request:    req,
 		}, nil
 	})
@@ -152,5 +165,40 @@ func TestCreateResponseReaderNon200(t *testing.T) {
 	}
 	if _, err := createResponseReader(doer, req); err == nil {
 		t.Fatalf("expected non-200 error")
+	}
+	if !body.closed {
+		t.Fatalf("expected response body to be closed on non-200 response")
+	}
+}
+
+func TestCreateResponseReaderNon200CloseError(t *testing.T) {
+	closeErr := errors.New("close failed")
+	body := &trackingReadCloser{
+		Reader:   strings.NewReader(""),
+		closeErr: closeErr,
+	}
+	doer := doerFunc(func(req *http.Request) (*http.Response, error) {
+		return &http.Response{
+			StatusCode: http.StatusBadGateway,
+			Status:     "502 Bad Gateway",
+			Header:     http.Header{},
+			Body:       body,
+			Request:    req,
+		}, nil
+	})
+
+	req, err := http.NewRequest(http.MethodGet, "https://example.com", nil)
+	if err != nil {
+		t.Fatalf("unexpected request error: %v", err)
+	}
+	_, err = createResponseReader(doer, req)
+	if err == nil {
+		t.Fatalf("expected close error")
+	}
+	if !errors.Is(err, closeErr) {
+		t.Fatalf("expected wrapped close error %q, got %v", closeErr, err)
+	}
+	if !body.closed {
+		t.Fatalf("expected response body close to be attempted")
 	}
 }

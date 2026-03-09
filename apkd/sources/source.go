@@ -192,6 +192,11 @@ func createResponseReader(httpClient network.Doer, req *http.Request) (io.ReadCl
 		return nil, err
 	}
 	if resp.StatusCode != http.StatusOK {
+		if resp.Body != nil {
+			if closeErr := resp.Body.Close(); closeErr != nil {
+				return nil, fmt.Errorf("error %s: failed to close response body: %w", resp.Status, closeErr)
+			}
+		}
 		return nil, fmt.Errorf("error: %s", resp.Status)
 	}
 	return resp.Body, nil
