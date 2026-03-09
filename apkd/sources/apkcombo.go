@@ -9,8 +9,8 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/kiber-io/apkd/apkd/browsers"
 	"github.com/kiber-io/apkd/apkd/network"
+	fakeUserAgent "github.com/lib4u/fake-useragent"
 
 	"github.com/PuerkitoBio/goquery"
 	"github.com/dustin/go-humanize"
@@ -28,7 +28,7 @@ func (s *ApkCombo) Download(version Version) (io.ReadCloser, error) {
 	if err != nil {
 		return nil, err
 	}
-	return createResponseReader(req)
+	return createResponseReader(s.Http(), req)
 }
 
 func (s *ApkCombo) FindByPackage(packageName string, versionCode int) (Version, error) {
@@ -215,9 +215,10 @@ func (s *ApkCombo) FindByPackage(packageName string, versionCode int) (Version, 
 			return true
 		}
 		fileTypeText := strings.TrimSpace(fileTypeBlock.Text())
-		if fileTypeText == "APK" {
+		switch fileTypeText {
+		case "APK":
 			fileType = APK
-		} else if fileTypeText == "XAPK" {
+		case "XAPK":
 			fileType = XAPK
 		}
 		if fileType == "" {
@@ -289,9 +290,16 @@ func (s *ApkCombo) FindByDeveloper(developerId string) ([]string, error) {
 func newApkComboSource() (Source, error) {
 	s := &ApkCombo{}
 	s.Source = s
-	s.Net = network.DefaultClient().WithDefaultHeaders(http.Header{
-		"User-Agent": {browsers.GetRandomUserAgent()},
+	ua, err := fakeUserAgent.New()
+	if err != nil {
+		return nil, fmt.Errorf("failed to create fake user agent: %v", err)
+	}
+	randomUA := ua.Filter().Platform(fakeUserAgent.Desktop).Browser(fakeUserAgent.Firefox, fakeUserAgent.Chrome).Get()
+	s.Log().Logd(fmt.Sprintf("Using User-Agent: %s", randomUA))
+	headers := network.ApplySourceHeaderOverrides(s.Name(), http.Header{
+		"User-Agent": {randomUA},
 	})
+	s.Net = network.DefaultClientForSource(s.Name()).WithDefaultHeaders(headers)
 	return s, nil
 }
 

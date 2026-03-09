@@ -12,11 +12,11 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"regexp"
 	"strconv"
 	"strings"
 
 	"github.com/kiber-io/apkd/apkd/devices"
-	"github.com/kiber-io/apkd/apkd/logging"
 	"github.com/kiber-io/apkd/apkd/network"
 )
 
@@ -26,10 +26,25 @@ type RuStore struct {
 	device    devices.Device
 }
 
-var logger = logging.Named("sources.rustore")
+type RuStoreProfile struct {
+	AppVersion     string `yaml:"app_version"`
+	AppVersionCode string `yaml:"app_version_code"`
+	FirmwareLang   string `yaml:"firmware_lang"`
+}
+
+var ruStoreVerCodeRegexp = regexp.MustCompile(`^\d+$`)
+var firmwareLangRegexp = regexp.MustCompile(`^[a-z]{2,8}$`)
 
 func (s *RuStore) Name() string {
 	return "rustore"
+}
+
+func defaultRuStoreProfile() RuStoreProfile {
+	return RuStoreProfile{
+		AppVersion:     "1.93.0.3",
+		AppVersionCode: "1093003",
+		FirmwareLang:   "ru",
+	}
 }
 
 func (s *RuStore) Download(version Version) (io.ReadCloser, error) {
@@ -46,7 +61,7 @@ func (s *RuStore) Download(version Version) (io.ReadCloser, error) {
 	if err != nil {
 		return nil, err
 	}
-	return createResponseReader(req)
+	return createResponseReader(s.Http(), req)
 }
 
 func (s *RuStore) generateDeviceId() string {
@@ -78,7 +93,7 @@ func (s *RuStore) generateDeviceId() string {
 		}
 	}
 
-	return string(b1) + "--" + string(b2)
+	return string(b1) + "-" + string(b2)
 }
 
 func (s *RuStore) getAppInfo(packageName string) (map[string]any, error) {
@@ -130,10 +145,10 @@ func (s *RuStore) getDownloadLink(appId float64) (string, error) {
 		"appId":                appId,
 		"firstInstall":         true,
 		"mobileServices":       []string{"GMS"},
-		"supportedAbis":        s.device.Platforms,
-		"screenDensity":        480,
+		"supportedAbis":        s.device.CPUAbis,
+		"screenDensity":        s.device.DPI,
 		"supportedLocales":     []string{"en_US", "ru_RU"},
-		"sdkVersion":           s.device.BuildVersionSdkInt,
+		"sdkVersion":           s.device.SDKInt,
 		"withoutSplits":        true,
 		"signatureFingerprint": nil,
 	}
@@ -305,7 +320,7 @@ func (s *RuStore) ExtractApkFromZip(zipFile string, outFile string) (retErr erro
 	hasManifest := false
 	var apkFile *zip.File
 	for _, f := range r.File {
-		logger.Logd(fmt.Sprintf("Checking file in zip: %s", f.Name))
+		s.Log().Logd(fmt.Sprintf("Checking file in zip: %s", f.Name))
 		if f.FileInfo().IsDir() {
 			continue
 		}
@@ -321,7 +336,7 @@ func (s *RuStore) ExtractApkFromZip(zipFile string, outFile string) (retErr erro
 
 	if hasManifest {
 		// The zip file is already an APK, no need to extract
-		logger.Logd(fmt.Sprintf("The file %s is already an APK, skipping extraction", zipFile))
+		s.Log().Logd(fmt.Sprintf("The file %s is already an APK, skipping extraction", zipFile))
 		if err := closeZipReader(); err != nil {
 			return err
 		}
@@ -335,7 +350,7 @@ func (s *RuStore) ExtractApkFromZip(zipFile string, outFile string) (retErr erro
 		return fmt.Errorf("no .apk file found in archive %s", zipFile)
 	}
 
-	logger.Logd(fmt.Sprintf("Extracting .apk from zip file: %s", zipFile))
+	s.Log().Logd(fmt.Sprintf("Extracting .apk from zip file: %s", zipFile))
 	tmpFile, err := os.CreateTemp(filepath.Dir(outFile), filepath.Base(outFile)+".tmp-*")
 	if err != nil {
 		return err
@@ -414,26 +429,53 @@ func (s *RuStore) ExtractApkFromZip(zipFile string, outFile string) (retErr erro
 func newRuStoreSource() (Source, error) {
 	s := &RuStore{
 		appsCache: make(map[string]map[string]any),
-		device:    devices.GetRandomDevice(),
+		device:    devices.RandomDevice(),
+	}
+	profile, err := ResolveSourceProfile(s.Name(), defaultRuStoreProfile())
+	if err != nil {
+		return nil, err
 	}
 	s.Source = s
-	logger.Logd(fmt.Sprintf("Initialized RuStore source with device: %s %s (Android %s, SDK %d)", s.device.BuildBrand, s.device.BuildModel, s.device.BuildVersionRelease, s.device.BuildVersionSdkInt))
-	s.Net = network.DefaultClient().WithDefaultHeaders(http.Header{
-		"User-Agent":             {"RuStore/1.93.0.3 (Android " + s.device.BuildVersionRelease + "; SDK " + strconv.Itoa(s.device.BuildVersionSdkInt) + "; " + s.device.Platforms[0] + "; " + s.device.BuildModel + "; ru)"},
+	s.Log().Logd(fmt.Sprintf("Initialized with device: %s %s (Android %s, SDK %d)", s.device.Brand, s.device.Model, s.device.AndroidVersion, s.device.SDKInt))
+	s.Log().Logd(fmt.Sprintf("Using profile: %+v", profile))
+	headers := network.ApplySourceHeaderOverrides(s.Name(), http.Header{
+		"User-Agent":             {fmt.Sprintf("RuStore/1.93.0.3 (Android %s; SDK %d; %s; %s %s; ru)", s.device.AndroidVersion, s.device.SDKInt, s.device.CPUAbis[0], s.device.Manufacturer, s.device.Model)},
 		"deviceId":               {s.generateDeviceId()},
-		"deviceManufacturerName": {s.device.BuildBrand},
-		"deviceModelName":        {s.device.BuildModel},
-		"deviceModel":            {s.device.BuildBrand + " " + s.device.BuildModel},
+		"deviceManufacturerName": {s.device.Manufacturer},
+		"deviceModelName":        {s.device.Model},
+		"deviceModel":            {s.device.Manufacturer + " " + s.device.Model},
 		"firmwareLang":           {"ru"},
-		"androidSdkVer":          {strconv.Itoa(s.device.BuildVersionSdkInt)},
-		"firmwareVer":            {s.device.BuildVersionRelease},
+		"androidSdkVer":          {strconv.Itoa(s.device.SDKInt)},
+		"firmwareVer":            {s.device.AndroidVersion},
 		"deviceType":             {"mobile"},
-		"ruStoreVerCode":         {"1093003"},
+		"ruStoreVerCode":         {profile.AppVersionCode},
 		"Content-Type":           {"application/json; charset=utf-8"},
 	})
+	s.Net = network.DefaultClientForSource(s.Name()).WithDefaultHeaders(headers)
 	return s, nil
 }
 
 func init() {
-	RegisterSourceFactory(newRuStoreSource)
+	RegisterSourceFactoryWithProfile(
+		newRuStoreSource,
+		"rustore",
+		NewProfileDecoderWithDefaults(
+			defaultRuStoreProfile(),
+			func(p *RuStoreProfile) {
+				p.FirmwareLang = strings.ToLower(strings.TrimSpace(p.FirmwareLang))
+			},
+			func(p RuStoreProfile) error {
+				if !appVersionRegexp.MatchString(p.AppVersion) {
+					return fmt.Errorf("app_version %q is invalid", p.AppVersion)
+				}
+				if !ruStoreVerCodeRegexp.MatchString(p.AppVersionCode) {
+					return fmt.Errorf("app_version_code %q must contain only digits", p.AppVersionCode)
+				}
+				if !firmwareLangRegexp.MatchString(p.FirmwareLang) {
+					return fmt.Errorf("firmware_lang %q must match [a-z]{2,8}", p.FirmwareLang)
+				}
+				return nil
+			},
+		),
+	)
 }

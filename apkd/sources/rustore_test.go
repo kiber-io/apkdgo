@@ -6,6 +6,8 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"gopkg.in/yaml.v3"
 )
 
 func createZipFile(t *testing.T, path string, files map[string]string) {
@@ -35,9 +37,9 @@ func createZipFile(t *testing.T, path string, files map[string]string) {
 func TestRuStoreGenerateDeviceIDFormat(t *testing.T) {
 	s := &RuStore{}
 	id := s.generateDeviceId()
-	parts := strings.Split(id, "--")
+	parts := strings.Split(id, "-")
 	if len(parts) != 2 {
-		t.Fatalf("expected 2 parts separated by '--', got %q", id)
+		t.Fatalf("expected 2 parts separated by '-', got %q", id)
 	}
 	if len(parts[0]) != 16 {
 		t.Fatalf("expected first part length 16, got %d", len(parts[0]))
@@ -167,5 +169,34 @@ func TestExtractApkFromZipReturnsErrorWhenNoApkFound(t *testing.T) {
 	}
 	if !strings.Contains(err.Error(), "no .apk file found") {
 		t.Fatalf("unexpected error text: %v", err)
+	}
+}
+
+func TestDecodeRuStoreProfileDefaults(t *testing.T) {
+	var node yaml.Node
+	if err := yaml.Unmarshal([]byte("{}"), &node); err != nil {
+		t.Fatalf("failed to unmarshal yaml node: %v", err)
+	}
+	profileAny, err := DecodeSourceProfile("rustore", node.Content[0])
+	if err != nil {
+		t.Fatalf("unexpected profile decode error: %v", err)
+	}
+	profile, ok := profileAny.(RuStoreProfile)
+	if !ok {
+		t.Fatalf("unexpected profile type: %T", profileAny)
+	}
+	expected := defaultRuStoreProfile()
+	if profile != expected {
+		t.Fatalf("unexpected default profile: got=%+v expected=%+v", profile, expected)
+	}
+}
+
+func TestDecodeRuStoreProfileUnknownField(t *testing.T) {
+	var node yaml.Node
+	if err := yaml.Unmarshal([]byte("{bad: value}"), &node); err != nil {
+		t.Fatalf("failed to unmarshal yaml node: %v", err)
+	}
+	if _, err := DecodeSourceProfile("rustore", node.Content[0]); err == nil {
+		t.Fatalf("expected decode error for unknown field")
 	}
 }

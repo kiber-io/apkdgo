@@ -17,6 +17,12 @@ func (timeoutErr) Error() string   { return "timeout" }
 func (timeoutErr) Timeout() bool   { return true }
 func (timeoutErr) Temporary() bool { return true }
 
+type roundTripFunc func(*http.Request) (*http.Response, error)
+
+func (f roundTripFunc) RoundTrip(req *http.Request) (*http.Response, error) {
+	return f(req)
+}
+
 func TestDefaultRetryDecider(t *testing.T) {
 	decider := defaultRetryDecider([]int{http.StatusTooManyRequests})
 	req, err := http.NewRequest(http.MethodGet, "https://example.com", nil)
@@ -54,6 +60,77 @@ func TestWithRequestRetryIf(t *testing.T) {
 	}
 	if got(req, nil, nil, 1, 3) != RetryNo {
 		t.Fatalf("expected custom decider result")
+	}
+}
+
+func TestWithoutClientTimeout(t *testing.T) {
+	if req := WithoutClientTimeout(nil); req != nil {
+		t.Fatalf("expected nil request to stay nil")
+	}
+
+	req, err := http.NewRequest(http.MethodGet, "https://example.com", nil)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if withoutClientTimeoutFromRequest(req) {
+		t.Fatalf("expected request without timeout override by default")
+	}
+	req = WithoutClientTimeout(req)
+	if !withoutClientTimeoutFromRequest(req) {
+		t.Fatalf("expected request timeout override to be set")
+	}
+}
+
+func TestDoWithWithoutClientTimeoutDisablesHTTPClientTimeout(t *testing.T) {
+	var sawDeadline bool
+	baseHTTPClient := &http.Client{
+		Timeout: 40 * time.Millisecond,
+		Transport: roundTripFunc(func(req *http.Request) (*http.Response, error) {
+			_, sawDeadline = req.Context().Deadline()
+			return &http.Response{
+				StatusCode: http.StatusOK,
+				Status:     "200 OK",
+				Header:     http.Header{},
+				Body:       io.NopCloser(strings.NewReader("ok")),
+				Request:    req,
+			}, nil
+		}),
+	}
+	client := &Client{
+		doer: baseHTTPClient,
+		retry: &RetryPolice{
+			MaxAttempts: 1,
+			Delay:       1,
+			MaxDelay:    1,
+		},
+	}
+
+	req, err := http.NewRequest(http.MethodGet, "https://example.com", nil)
+	if err != nil {
+		t.Fatalf("unexpected request error: %v", err)
+	}
+	resp, err := client.Do(req)
+	if err != nil {
+		t.Fatalf("unexpected request error: %v", err)
+	}
+	resp.Body.Close()
+	if !sawDeadline {
+		t.Fatalf("expected request deadline when client timeout is enabled")
+	}
+
+	sawDeadline = false
+	req, err = http.NewRequest(http.MethodGet, "https://example.com", nil)
+	if err != nil {
+		t.Fatalf("unexpected request error: %v", err)
+	}
+	req = WithoutClientTimeout(req)
+	resp, err = client.Do(req)
+	if err != nil {
+		t.Fatalf("unexpected request error with timeout override: %v", err)
+	}
+	resp.Body.Close()
+	if sawDeadline {
+		t.Fatalf("expected request deadline to be disabled by timeout override")
 	}
 }
 
@@ -136,5 +213,203 @@ func TestReadAndRestoreBodyNilResponse(t *testing.T) {
 	}
 	if _, err := ReadAndRestoreBody(&http.Response{}); err == nil {
 		t.Fatalf("expected error for nil response body")
+	}
+}
+
+func TestConfigureProxies(t *testing.T) {
+	proxyConfigMu.Lock()
+	oldGlobalProxyURL := globalProxyURL
+	oldSourceProxyURLs := sourceProxyURLs
+	proxyConfigMu.Unlock()
+	t.Cleanup(func() {
+		proxyConfigMu.Lock()
+		globalProxyURL = oldGlobalProxyURL
+		sourceProxyURLs = oldSourceProxyURLs
+		proxyConfigMu.Unlock()
+	})
+
+	if err := ConfigureProxies("http://127.0.0.1:8080", map[string]string{
+		"rustore": "http://127.0.0.1:9090",
+	}, false); err != nil {
+		t.Fatalf("unexpected configure proxies error: %v", err)
+	}
+
+	req, err := http.NewRequest(http.MethodGet, "https://example.com", nil)
+	if err != nil {
+		t.Fatalf("unexpected request error: %v", err)
+	}
+
+	rustoreClient := DefaultClientForSource("rustore")
+	rustoreHTTPClient, ok := rustoreClient.doer.(*http.Client)
+	if !ok {
+		t.Fatalf("unexpected doer type: %T", rustoreClient.doer)
+	}
+	rustoreTransport, ok := rustoreHTTPClient.Transport.(*http.Transport)
+	if !ok {
+		t.Fatalf("unexpected transport type: %T", rustoreHTTPClient.Transport)
+	}
+	rustoreProxyURL, err := rustoreTransport.Proxy(req)
+	if err != nil {
+		t.Fatalf("unexpected rustore proxy resolve error: %v", err)
+	}
+	if rustoreProxyURL == nil || rustoreProxyURL.String() != "http://127.0.0.1:9090" {
+		t.Fatalf("unexpected rustore proxy URL: %v", rustoreProxyURL)
+	}
+
+	fdroidClient := DefaultClientForSource("fdroid")
+	fdroidHTTPClient, ok := fdroidClient.doer.(*http.Client)
+	if !ok {
+		t.Fatalf("unexpected doer type: %T", fdroidClient.doer)
+	}
+	fdroidTransport, ok := fdroidHTTPClient.Transport.(*http.Transport)
+	if !ok {
+		t.Fatalf("unexpected transport type: %T", fdroidHTTPClient.Transport)
+	}
+	fdroidProxyURL, err := fdroidTransport.Proxy(req)
+	if err != nil {
+		t.Fatalf("unexpected fdroid proxy resolve error: %v", err)
+	}
+	if fdroidProxyURL == nil || fdroidProxyURL.String() != "http://127.0.0.1:8080" {
+		t.Fatalf("unexpected fdroid proxy URL: %v", fdroidProxyURL)
+	}
+}
+
+func TestConfigureProxiesInvalidURL(t *testing.T) {
+	if err := ConfigureProxies("://bad", nil, false); err == nil {
+		t.Fatalf("expected error for invalid global proxy URL")
+	}
+	if err := ConfigureProxies("", map[string]string{"fdroid": "://bad"}, false); err == nil {
+		t.Fatalf("expected error for invalid source proxy URL")
+	}
+}
+
+func TestConfigureProxiesWithInsecureSkipVerify(t *testing.T) {
+	proxyConfigMu.Lock()
+	oldGlobalProxyURL := globalProxyURL
+	oldSourceProxyURLs := sourceProxyURLs
+	oldProxyInsecureSkipVerify := proxyInsecureSkipVerify
+	proxyConfigMu.Unlock()
+	t.Cleanup(func() {
+		proxyConfigMu.Lock()
+		globalProxyURL = oldGlobalProxyURL
+		sourceProxyURLs = oldSourceProxyURLs
+		proxyInsecureSkipVerify = oldProxyInsecureSkipVerify
+		proxyConfigMu.Unlock()
+	})
+
+	if err := ConfigureProxies("http://127.0.0.1:8080", nil, true); err != nil {
+		t.Fatalf("unexpected configure proxies error: %v", err)
+	}
+	client := DefaultClientForSource("fdroid")
+	httpClient, ok := client.doer.(*http.Client)
+	if !ok {
+		t.Fatalf("unexpected doer type: %T", client.doer)
+	}
+	transport, ok := httpClient.Transport.(*http.Transport)
+	if !ok {
+		t.Fatalf("unexpected transport type: %T", httpClient.Transport)
+	}
+	if transport.TLSClientConfig == nil || !transport.TLSClientConfig.InsecureSkipVerify {
+		t.Fatalf("expected InsecureSkipVerify=true when proxy insecure mode is enabled")
+	}
+}
+
+func TestConfigureProxiesWithoutInsecureSkipVerify(t *testing.T) {
+	proxyConfigMu.Lock()
+	oldGlobalProxyURL := globalProxyURL
+	oldSourceProxyURLs := sourceProxyURLs
+	oldProxyInsecureSkipVerify := proxyInsecureSkipVerify
+	proxyConfigMu.Unlock()
+	t.Cleanup(func() {
+		proxyConfigMu.Lock()
+		globalProxyURL = oldGlobalProxyURL
+		sourceProxyURLs = oldSourceProxyURLs
+		proxyInsecureSkipVerify = oldProxyInsecureSkipVerify
+		proxyConfigMu.Unlock()
+	})
+
+	if err := ConfigureProxies("http://127.0.0.1:8080", nil, false); err != nil {
+		t.Fatalf("unexpected configure proxies error: %v", err)
+	}
+	client := DefaultClientForSource("fdroid")
+	httpClient, ok := client.doer.(*http.Client)
+	if !ok {
+		t.Fatalf("unexpected doer type: %T", client.doer)
+	}
+	transport, ok := httpClient.Transport.(*http.Transport)
+	if !ok {
+		t.Fatalf("unexpected transport type: %T", httpClient.Transport)
+	}
+	if transport.TLSClientConfig != nil && transport.TLSClientConfig.InsecureSkipVerify {
+		t.Fatalf("expected InsecureSkipVerify=false when proxy insecure mode is disabled")
+	}
+}
+
+func TestConfigureClientDefaults(t *testing.T) {
+	clientDefaultsMu.Lock()
+	oldTimeout := defaultClientTimeout
+	oldRetry := cloneRetryPolicy(defaultRetryPolicy)
+	clientDefaultsMu.Unlock()
+	t.Cleanup(func() {
+		clientDefaultsMu.Lock()
+		defaultClientTimeout = oldTimeout
+		defaultRetryPolicy = oldRetry
+		clientDefaultsMu.Unlock()
+	})
+
+	timeout := 42 * time.Second
+	retry := &RetryPolice{
+		MaxAttempts: 3,
+		Delay:       250,
+		MaxDelay:    1000,
+		RetryStatus: []int{429, 503},
+	}
+	if err := ConfigureClientDefaults(&timeout, retry); err != nil {
+		t.Fatalf("unexpected configure client defaults error: %v", err)
+	}
+	client := DefaultClientForSource("fdroid")
+	httpClient, ok := client.doer.(*http.Client)
+	if !ok {
+		t.Fatalf("unexpected doer type: %T", client.doer)
+	}
+	if httpClient.Timeout != timeout {
+		t.Fatalf("expected timeout %v, got %v", timeout, httpClient.Timeout)
+	}
+	if client.retry.MaxAttempts != 3 || client.retry.Delay != 250 || client.retry.MaxDelay != 1000 {
+		t.Fatalf("unexpected retry policy: %+v", client.retry)
+	}
+}
+
+func TestConfigureSourceHeaderOverrides(t *testing.T) {
+	sourceHeadersMu.Lock()
+	oldOverrides := sourceHeaderOverrides
+	sourceHeadersMu.Unlock()
+	t.Cleanup(func() {
+		sourceHeadersMu.Lock()
+		sourceHeaderOverrides = oldOverrides
+		sourceHeadersMu.Unlock()
+	})
+
+	if err := ConfigureSourceHeaderOverrides(map[string]map[string]string{
+		"RuStore": {
+			"user-agent": "custom-agent",
+			"deviceId":   "custom-id",
+		},
+	}); err != nil {
+		t.Fatalf("unexpected configure source headers error: %v", err)
+	}
+
+	headers := ApplySourceHeaderOverrides("rustore", http.Header{
+		"User-Agent": {"default-agent"},
+		"X-Test":     {"1"},
+	})
+	if got := headers.Get("User-Agent"); got != "custom-agent" {
+		t.Fatalf("expected overridden User-Agent, got %q", got)
+	}
+	if got := headers.Get("deviceId"); got != "custom-id" {
+		t.Fatalf("expected configured deviceId, got %q", got)
+	}
+	if got := headers.Get("X-Test"); got != "1" {
+		t.Fatalf("expected existing header to be preserved, got %q", got)
 	}
 }

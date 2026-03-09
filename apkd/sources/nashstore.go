@@ -7,6 +7,7 @@ import (
 	"io"
 	"math/rand"
 	"net/http"
+	"strings"
 	"time"
 
 	"github.com/kiber-io/apkd/apkd/devices"
@@ -37,6 +38,17 @@ type NashStore struct {
 	BaseSource
 
 	device devices.Device
+}
+
+type NashStoreProfile struct {
+	AppVersion string `yaml:"appVersion"`
+	Token      string `yaml:"token"`
+}
+
+func defaultNashStoreProfile() NashStoreProfile {
+	return NashStoreProfile{
+		AppVersion: "0.0.6",
+	}
 }
 
 func (s *NashStore) Name() string {
@@ -162,7 +174,7 @@ func (s *NashStore) Download(version Version) (io.ReadCloser, error) {
 	if err != nil {
 		return nil, err
 	}
-	return createResponseReader(req)
+	return createResponseReader(s.Http(), req)
 }
 
 func (s *NashStore) MaxParallelsDownloads() int {
@@ -224,39 +236,62 @@ func (s *NashStore) FindByDeveloper(developerId string) ([]string, error) {
 
 func newNashStoreSource() (Source, error) {
 	s := &NashStore{
-		device: devices.GetRandomDevice(),
+		device: devices.RandomDevice(),
 	}
 	s.Source = s
 	tok := s.answer42()
 	appHeader := map[string]any{
-		"androidId":   s.device.GenerateAndroidID(),
-		"apiLevel":    s.device.BuildVersionSdkInt,
+		"androidId":   s.device.AndroidID,
+		"apiLevel":    s.device.SDKInt,
 		"baseOs":      "",
-		"buildId":     s.device.BuildId,
+		"buildId":     s.device.BuildID,
 		"carrier":     "MTS",
-		"deviceName":  s.device.BuildModel,
-		"fingerprint": s.device.BuildFingerprint,
+		"deviceName":  s.device.Model,
+		"fingerprint": s.device.Fingerprint,
 		"fontScale":   1,
-		"brand":       s.device.BuildBrand,
-		"deviceId":    s.device.BuildDevice,
-		"width":       s.device.ScreenWidth,
-		"height":      s.device.ScreenHeight,
+		"brand":       s.device.Brand,
+		"deviceId":    s.device.Device,
+		"width":       s.device.Width,
+		"height":      s.device.Height,
 		"scale":       2.625,
 	}
 	appHeaderBytes, err := json.Marshal(appHeader)
 	if err != nil {
 		return nil, fmt.Errorf("failed to marshal nashstore app header: %w", err)
 	}
-	s.Net = network.DefaultClient().WithDefaultHeaders(http.Header{
-		"User-Agent":    {"Nashstore [com.nashstore][0.0.6][" + cases.Title(language.English).String(s.device.BuildBrand) + "]"},
+	profile, err := ResolveSourceProfile(s.Name(), defaultNashStoreProfile())
+	if err != nil {
+		return nil, fmt.Errorf("failed to decode nashstore profile: %w", err)
+	}
+	if profile.Token != "" {
+		tok = profile.Token
+	}
+	s.Log().Logd(fmt.Sprintf("Using profile: %+v", profile))
+	headers := network.ApplySourceHeaderOverrides(s.Name(), http.Header{
+		"User-Agent":    {"Nashstore [com.nashstore][" + profile.AppVersion + "][" + cases.Title(language.English).String(s.device.Brand) + "]"},
 		"Content-Type":  {"application/json"},
 		"xaccesstoken":  {tok},
 		"Cookie":        {"nashstore_token=" + tok},
 		"nashstore-app": {string(appHeaderBytes)},
 	})
+	s.Net = network.DefaultClientForSource(s.Name()).WithDefaultHeaders(headers)
 	return s, nil
 }
 
 func init() {
-	RegisterSourceFactory(newNashStoreSource)
+	RegisterSourceFactoryWithProfile(newNashStoreSource, "nashstore", NewProfileDecoderWithDefaults(
+		defaultNashStoreProfile(),
+		func(p *NashStoreProfile) {
+			p.AppVersion = strings.TrimSpace(p.AppVersion)
+		},
+		func(p NashStoreProfile) error {
+			if strings.TrimSpace(p.AppVersion) == "" {
+				return fmt.Errorf("appVersion cannot be empty")
+			}
+			if !appVersionRegexp.MatchString(p.AppVersion) {
+				return fmt.Errorf("appVersion %q is invalid", p.AppVersion)
+			}
+			return nil
+		},
+	))
 }
