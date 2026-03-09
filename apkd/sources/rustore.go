@@ -415,7 +415,7 @@ func newRuStoreSource() (Source, error) {
 		device:    devices.GetRandomDevice(),
 	}
 	s.Source = s
-	logger.Logi(fmt.Sprintf("Initialized RuStore source with device: %s %s (Android %s, SDK %d)", s.device.BuildBrand, s.device.BuildModel, s.device.BuildVersionRelease, s.device.BuildVersionSdkInt))
+	logger.Logd(fmt.Sprintf("Initialized RuStore source with device: %s %s (Android %s, SDK %d)", s.device.BuildBrand, s.device.BuildModel, s.device.BuildVersionRelease, s.device.BuildVersionSdkInt))
 	s.Net = network.DefaultClient().WithDefaultHeaders(http.Header{
 		"User-Agent":             {"RuStore/1.93.0.3 (Android " + s.device.BuildVersionRelease + "; SDK " + strconv.Itoa(s.device.BuildVersionSdkInt) + "; " + s.device.Platforms[0] + "; " + s.device.BuildModel + "; ru)"},
 		"deviceId":               {s.generateDeviceId()},
