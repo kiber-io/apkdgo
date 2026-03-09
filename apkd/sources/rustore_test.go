@@ -37,9 +37,9 @@ func createZipFile(t *testing.T, path string, files map[string]string) {
 func TestRuStoreGenerateDeviceIDFormat(t *testing.T) {
 	s := &RuStore{}
 	id := s.generateDeviceId()
-	parts := strings.Split(id, "--")
+	parts := strings.Split(id, "-")
 	if len(parts) != 2 {
-		t.Fatalf("expected 2 parts separated by '--', got %q", id)
+		t.Fatalf("expected 2 parts separated by '-', got %q", id)
 	}
 	if len(parts[0]) != 16 {
 		t.Fatalf("expected first part length 16, got %d", len(parts[0]))
