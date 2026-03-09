@@ -133,6 +133,37 @@ func TestLoadConfigUsesBuiltInDefaultsWhenFileIsEmpty(t *testing.T) {
 	}
 }
 
+func TestLoadConfigResolvesOutputDirRelativeToConfigPath(t *testing.T) {
+	configDir := t.TempDir()
+	configPath := filepath.Join(configDir, "apkd.yaml")
+	if err := os.WriteFile(configPath, []byte("version: 1\ndefaults:\n  output_dir: ./downloads\n"), 0644); err != nil {
+		t.Fatalf("failed to write config file: %v", err)
+	}
+
+	originalWD, err := os.Getwd()
+	if err != nil {
+		t.Fatalf("failed to get current working directory: %v", err)
+	}
+	t.Cleanup(func() {
+		_ = os.Chdir(originalWD)
+	})
+	if err := os.Chdir(t.TempDir()); err != nil {
+		t.Fatalf("failed to change working directory: %v", err)
+	}
+
+	cfg, err := loadConfig(configPath)
+	if err != nil {
+		t.Fatalf("unexpected load config error: %v", err)
+	}
+	if cfg.Defaults.OutputDir == nil {
+		t.Fatalf("expected output_dir to be set")
+	}
+	expectedOutputDir := filepath.Join(configDir, "downloads")
+	if *cfg.Defaults.OutputDir != expectedOutputDir {
+		t.Fatalf("unexpected output_dir: got=%q expected=%q", *cfg.Defaults.OutputDir, expectedOutputDir)
+	}
+}
+
 func TestResolveConfigPathExplicit(t *testing.T) {
 	configPath := writeTestConfig(t, "version: 1\n")
 	got, err := resolveConfigPath(configPath)

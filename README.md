@@ -145,6 +145,7 @@ Config format is YAML (`version: 1`). Precedence is:
 3. Built-in code defaults
 
 When a CLI flag overrides a config value, the tool logs it.
+Relative paths in config (for example `defaults.output_dir`) are resolved relative to the config file location.
 
 Default config lookup path (when `--config` is omitted):
 - `~/.config/apkd/config.yml`

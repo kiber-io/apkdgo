@@ -145,8 +145,12 @@ func resolveConfigPath(path string) (string, error) {
 func loadConfig(path string) (*AppConfig, error) {
 	cfg := cloneBuiltInDefaultConfig()
 	normalizedPath := strings.TrimSpace(path)
+	configDir := ""
+	if normalizedPath != "" {
+		configDir = filepath.Dir(normalizedPath)
+	}
 	if normalizedPath == "" {
-		if err := normalizeConfig(cfg); err != nil {
+		if err := normalizeConfig(cfg, configDir); err != nil {
 			return nil, err
 		}
 		return cfg, nil
@@ -162,7 +166,7 @@ func loadConfig(path string) (*AppConfig, error) {
 	decoder.KnownFields(true)
 	if err := decoder.Decode(cfg); err != nil {
 		if errors.Is(err, io.EOF) {
-			if err := normalizeConfig(cfg); err != nil {
+			if err := normalizeConfig(cfg, configDir); err != nil {
 				return nil, err
 			}
 			return cfg, nil
@@ -176,13 +180,13 @@ func loadConfig(path string) (*AppConfig, error) {
 		}
 		return nil, err
 	}
-	if err := normalizeConfig(cfg); err != nil {
+	if err := normalizeConfig(cfg, configDir); err != nil {
 		return nil, err
 	}
 	return cfg, nil
 }
 
-func normalizeConfig(cfg *AppConfig) error {
+func normalizeConfig(cfg *AppConfig, configDir string) error {
 	if cfg.Version == 0 {
 		cfg.Version = defaultConfigVersion
 	}
@@ -202,6 +206,9 @@ func normalizeConfig(cfg *AppConfig) error {
 
 	if cfg.Defaults.OutputDir != nil {
 		outputDir := strings.TrimSpace(*cfg.Defaults.OutputDir)
+		if !filepath.IsAbs(outputDir) && configDir != "" {
+			outputDir = filepath.Join(configDir, outputDir)
+		}
 		outputDir, err := filepath.Abs(outputDir)
 		if err != nil {
 			return fmt.Errorf("error getting absolute path for output directory %s: %v", outputDir, err)
