@@ -3,12 +3,16 @@ package network
 import (
 	"bytes"
 	"context"
+	"crypto/tls"
 	"fmt"
 	"io"
 	"math/rand"
 	"net"
 	"net/http"
+	"net/url"
 	"slices"
+	"strings"
+	"sync"
 	"sync/atomic"
 	"time"
 
@@ -17,6 +21,10 @@ import (
 
 var reqSeq uint64
 var logger = logging.Named("network")
+var proxyConfigMu sync.RWMutex
+var globalProxyURL *url.URL
+var sourceProxyURLs = map[string]*url.URL{}
+var proxyInsecureSkipVerify bool
 
 func nextRequestID() uint64 {
 	n := atomic.AddUint64(&reqSeq, 1)
@@ -65,12 +73,34 @@ type Client struct {
 }
 
 func DefaultClient() *Client {
-	return NewHttpClient(30*time.Second, DefaultRetryPolice())
+	return NewHttpClientForSource("", 30*time.Second, DefaultRetryPolice())
+}
+
+func DefaultClientForSource(sourceName string) *Client {
+	return NewHttpClientForSource(sourceName, 30*time.Second, DefaultRetryPolice())
 }
 
 func NewHttpClient(timeout time.Duration, p *RetryPolice) *Client {
+	return NewHttpClientForSource("", timeout, p)
+}
+
+func NewHttpClientForSource(sourceName string, timeout time.Duration, p *RetryPolice) *Client {
+	proxyURL := resolveProxyURL(sourceName)
+	transport := http.DefaultTransport.(*http.Transport).Clone()
+	if proxyURL != nil {
+		transport.Proxy = http.ProxyURL(proxyURL)
+		if isProxyInsecureSkipVerifyEnabled() {
+			if transport.TLSClientConfig == nil {
+				transport.TLSClientConfig = &tls.Config{}
+			}
+			transport.TLSClientConfig.InsecureSkipVerify = true
+		}
+	} else {
+		transport.Proxy = http.ProxyFromEnvironment
+	}
 	base := &http.Client{
-		Timeout: timeout,
+		Timeout:   timeout,
+		Transport: transport,
 	}
 	if p == nil {
 		p = DefaultRetryPolice()
@@ -79,6 +109,67 @@ func NewHttpClient(timeout time.Duration, p *RetryPolice) *Client {
 		doer:  base,
 		retry: p,
 	}
+}
+
+func ConfigureProxies(globalProxy string, sourceProxies map[string]string, insecureSkipVerify bool) error {
+	parsedGlobalProxy, err := parseProxyURL(globalProxy)
+	if err != nil {
+		return fmt.Errorf("invalid global proxy: %w", err)
+	}
+	parsedSourceProxies := make(map[string]*url.URL, len(sourceProxies))
+	for sourceName, rawProxyURL := range sourceProxies {
+		normalizedSourceName := strings.ToLower(strings.TrimSpace(sourceName))
+		if normalizedSourceName == "" {
+			return fmt.Errorf("source name cannot be empty in source proxy map")
+		}
+		parsedSourceProxy, err := parseProxyURL(rawProxyURL)
+		if err != nil {
+			return fmt.Errorf("invalid proxy for source %s: %w", normalizedSourceName, err)
+		}
+		if parsedSourceProxy == nil {
+			continue
+		}
+		parsedSourceProxies[normalizedSourceName] = parsedSourceProxy
+	}
+	proxyConfigMu.Lock()
+	globalProxyURL = parsedGlobalProxy
+	sourceProxyURLs = parsedSourceProxies
+	proxyInsecureSkipVerify = insecureSkipVerify
+	proxyConfigMu.Unlock()
+	return nil
+}
+
+func parseProxyURL(rawProxyURL string) (*url.URL, error) {
+	normalizedProxyURL := strings.TrimSpace(rawProxyURL)
+	if normalizedProxyURL == "" {
+		return nil, nil
+	}
+	proxyURL, err := url.Parse(normalizedProxyURL)
+	if err != nil {
+		return nil, err
+	}
+	if proxyURL.Scheme == "" || proxyURL.Host == "" {
+		return nil, fmt.Errorf("proxy URL must include scheme and host")
+	}
+	return proxyURL, nil
+}
+
+func resolveProxyURL(sourceName string) *url.URL {
+	normalizedSourceName := strings.ToLower(strings.TrimSpace(sourceName))
+	proxyConfigMu.RLock()
+	defer proxyConfigMu.RUnlock()
+	if normalizedSourceName != "" {
+		if sourceProxyURL, exists := sourceProxyURLs[normalizedSourceName]; exists {
+			return sourceProxyURL
+		}
+	}
+	return globalProxyURL
+}
+
+func isProxyInsecureSkipVerifyEnabled() bool {
+	proxyConfigMu.RLock()
+	defer proxyConfigMu.RUnlock()
+	return proxyInsecureSkipVerify
 }
 
 func (c *Client) WithDefaultHeaders(headers http.Header) *Client {

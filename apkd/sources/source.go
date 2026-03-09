@@ -151,8 +151,11 @@ func unpackResponse(res *http.Response) (io.ReadCloser, error) {
 	}
 }
 
-func createResponseReader(req *http.Request) (io.ReadCloser, error) {
-	resp, err := http.DefaultClient.Do(req)
+func createResponseReader(httpClient network.Doer, req *http.Request) (io.ReadCloser, error) {
+	if httpClient == nil {
+		httpClient = network.DefaultClient()
+	}
+	resp, err := httpClient.Do(req)
 	if err != nil {
 		return nil, err
 	}
@@ -173,7 +176,11 @@ func (s *BaseSource) NewRequest(method, url string, body io.Reader) (*http.Reque
 
 func (s *BaseSource) Http() network.Doer {
 	if s.Net == nil {
-		s.Net = network.DefaultClient()
+		sourceName := ""
+		if s.Source != nil {
+			sourceName = s.Source.Name()
+		}
+		s.Net = network.DefaultClientForSource(sourceName)
 	}
 	return s.Net
 }

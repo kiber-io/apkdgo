@@ -12,6 +12,7 @@ import (
 	"syscall"
 
 	"github.com/kiber-io/apkd/apkd/logging"
+	"github.com/kiber-io/apkd/apkd/network"
 	"github.com/kiber-io/apkd/apkd/sources"
 
 	"slices"
@@ -24,6 +25,9 @@ var forceDownload bool
 var batchDeveloperDownloadMode bool
 var outputDir string
 var outputFileName string
+var globalProxy string
+var proxyInsecureSkipVerify bool
+var sourceProxyEntries []string
 var packagesFile string
 var packageNames []string
 var verbosity int
@@ -50,15 +54,26 @@ var rootCmd = cobra.Command{
 			verbosity = 1 // default verbosity level
 		}
 		logging.Init(verbosity)
-
-		if !printVersion {
-			if err := sources.InitializeRegisteredSources(); err != nil {
-				fmt.Printf("Error initializing sources: %v\n", err)
-				os.Exit(1)
-			}
+		if printVersion {
+			return
 		}
 
-		if listSources || printVersion {
+		sourceProxies, err := parseSourceProxyEntries(sourceProxyEntries)
+		if err != nil {
+			fmt.Printf("Error parsing --source-proxy: %v\n", err)
+			os.Exit(1)
+		}
+		if err := network.ConfigureProxies(globalProxy, sourceProxies, proxyInsecureSkipVerify); err != nil {
+			fmt.Printf("Error applying proxy settings: %v\n", err)
+			os.Exit(1)
+		}
+
+		if err := sources.InitializeRegisteredSources(); err != nil {
+			fmt.Printf("Error initializing sources: %v\n", err)
+			os.Exit(1)
+		}
+
+		if listSources {
 			return
 		}
 
@@ -213,9 +228,33 @@ func printSummary() {
 	fmt.Printf("\nSummary: downloaded %d, errors %d\n", downloadSuccessCount.Load(), downloadErrorCount.Load())
 }
 
+func parseSourceProxyEntries(entries []string) (map[string]string, error) {
+	result := make(map[string]string, len(entries))
+	for _, entry := range entries {
+		normalizedEntry := strings.TrimSpace(entry)
+		if normalizedEntry == "" {
+			continue
+		}
+		parts := strings.SplitN(normalizedEntry, "=", 2)
+		if len(parts) != 2 {
+			return nil, fmt.Errorf("invalid value %q, expected source=proxy-url", entry)
+		}
+		sourceName := strings.ToLower(strings.TrimSpace(parts[0]))
+		proxyURL := strings.TrimSpace(parts[1])
+		if sourceName == "" || proxyURL == "" {
+			return nil, fmt.Errorf("invalid value %q, source and proxy URL must be non-empty", entry)
+		}
+		result[sourceName] = proxyURL
+	}
+	return result, nil
+}
+
 func main() {
 	rootCmd.PersistentFlags().StringArrayVarP(&packageNames, "package", "p", []string{}, "package name of the app")
 	rootCmd.PersistentFlags().StringArrayVarP(&selectedSources, "source", "s", []string{}, "specify source(s) for downloading")
+	rootCmd.PersistentFlags().StringVar(&globalProxy, "proxy", "", "global proxy URL for all traffic")
+	rootCmd.PersistentFlags().BoolVar(&proxyInsecureSkipVerify, "proxy-insecure", false, "skip TLS certificate verification for requests sent through proxy")
+	rootCmd.PersistentFlags().StringArrayVar(&sourceProxyEntries, "source-proxy", []string{}, "source proxy mapping in format source=proxy-url (can be repeated)")
 	rootCmd.PersistentFlags().StringVarP(&packagesFile, "file", "f", "", "file containing package names")
 	rootCmd.PersistentFlags().BoolVarP(&batchDeveloperDownloadMode, "dev", "", false, "download all apps from developer")
 	rootCmd.PersistentFlags().BoolVarP(&forceDownload, "force", "F", false, "force download even if the file already exists")

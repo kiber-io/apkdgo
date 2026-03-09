@@ -54,7 +54,7 @@ func (s *FDroid) Download(version Version) (io.ReadCloser, error) {
 	// req.Header.Add("User-Agent", "F-Droid 1.21.1")
 	// req.Header.Add("Accept-Encoding", "gzip")
 	// req.Header.Add("accept-charset", "UTF-8")
-	return createResponseReader(req)
+	return createResponseReader(s.Http(), req)
 }
 
 func (s *FDroid) getJson() (map[string]any, error) {
@@ -230,7 +230,7 @@ func newFDroidSource() (Source, error) {
 	s := &FDroid{}
 	s.appsCache = make(map[string]map[string]any)
 	s.Source = s
-	s.Net = network.DefaultClient().WithDefaultHeaders(http.Header{
+	s.Net = network.DefaultClientForSource(s.Name()).WithDefaultHeaders(http.Header{
 		"User-Agent": {"F-Droid 1.23.1"},
 	})
 	return s, nil

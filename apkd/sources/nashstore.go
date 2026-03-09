@@ -162,7 +162,7 @@ func (s *NashStore) Download(version Version) (io.ReadCloser, error) {
 	if err != nil {
 		return nil, err
 	}
-	return createResponseReader(req)
+	return createResponseReader(s.Http(), req)
 }
 
 func (s *NashStore) MaxParallelsDownloads() int {
@@ -247,7 +247,7 @@ func newNashStoreSource() (Source, error) {
 	if err != nil {
 		return nil, fmt.Errorf("failed to marshal nashstore app header: %w", err)
 	}
-	s.Net = network.DefaultClient().WithDefaultHeaders(http.Header{
+	s.Net = network.DefaultClientForSource(s.Name()).WithDefaultHeaders(http.Header{
 		"User-Agent":    {"Nashstore [com.nashstore][0.0.6][" + cases.Title(language.English).String(s.device.BuildBrand) + "]"},
 		"Content-Type":  {"application/json"},
 		"xaccesstoken":  {tok},

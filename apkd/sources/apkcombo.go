@@ -28,7 +28,7 @@ func (s *ApkCombo) Download(version Version) (io.ReadCloser, error) {
 	if err != nil {
 		return nil, err
 	}
-	return createResponseReader(req)
+	return createResponseReader(s.Http(), req)
 }
 
 func (s *ApkCombo) FindByPackage(packageName string, versionCode int) (Version, error) {
@@ -289,7 +289,7 @@ func (s *ApkCombo) FindByDeveloper(developerId string) ([]string, error) {
 func newApkComboSource() (Source, error) {
 	s := &ApkCombo{}
 	s.Source = s
-	s.Net = network.DefaultClient().WithDefaultHeaders(http.Header{
+	s.Net = network.DefaultClientForSource(s.Name()).WithDefaultHeaders(http.Header{
 		"User-Agent": {browsers.GetRandomUserAgent()},
 	})
 	return s, nil

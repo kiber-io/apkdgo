@@ -59,6 +59,25 @@ apkd [flags]
   apkd -o app.apk -p com.example.app
   ```
 
+- `--proxy`:
+  Set a global proxy URL for all network traffic. Example:
+  ```bash
+  apkd --proxy http://127.0.0.1:8080 -p com.example.app
+  ```
+
+- `--source-proxy`:
+  Set proxy URL for a specific source in format `source=proxy-url` (can be repeated). Example:
+  ```bash
+  apkd --source-proxy rustore=http://127.0.0.1:8081 --source-proxy fdroid=http://127.0.0.1:8082 -p com.example.app
+  ```
+
+- `--proxy-insecure`:
+  Skip TLS certificate verification for HTTPS requests sent through proxy.
+  Useful for debugging with intercepting proxies. Example:
+  ```bash
+  apkd --proxy http://127.0.0.1:8080 --proxy-insecure -p com.example.app
+  ```
+
 - `--verbose`, `-v`:
   Set verbosity level. Use `-v` or `-vv` for more detailed logs. Example:
   ```bash
@@ -82,6 +101,21 @@ apkd [flags]
 Download an APK for a specific package from a specific source:
 ```bash
 apkd -p com.example.app -s apkpure -O ./downloads
+```
+
+Use global debug proxy:
+```bash
+apkd --proxy http://127.0.0.1:8080 -p org.fdroid.fdroid
+```
+
+Use source-specific proxy overrides:
+```bash
+apkd --proxy http://127.0.0.1:8080 --source-proxy rustore=http://127.0.0.1:8081 -p ru.vk.store
+```
+
+Use intercepting proxy with disabled TLS verification:
+```bash
+apkd --proxy http://127.0.0.1:8080 --proxy-insecure -p org.fdroid.fdroid
 ```
 
 ## License

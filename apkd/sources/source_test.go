@@ -13,17 +13,19 @@ type stubSource struct {
 	name string
 }
 
-type roundTripperFunc func(*http.Request) (*http.Response, error)
+type doerFunc func(*http.Request) (*http.Response, error)
 
-func (f roundTripperFunc) RoundTrip(req *http.Request) (*http.Response, error) {
+func (f doerFunc) Do(req *http.Request) (*http.Response, error) {
 	return f(req)
 }
 
-func (s stubSource) MaxParallelsDownloads() int                                      { return 1 }
-func (s stubSource) Name() string                                                    { return s.name }
-func (s stubSource) FindByPackage(string, int) (Version, error)                     { return Version{}, nil }
-func (s stubSource) FindByDeveloper(string) ([]string, error)                       { return nil, nil }
-func (s stubSource) Download(Version) (io.ReadCloser, error)                        { return io.NopCloser(strings.NewReader("")), nil }
+func (s stubSource) MaxParallelsDownloads() int                 { return 1 }
+func (s stubSource) Name() string                               { return s.name }
+func (s stubSource) FindByPackage(string, int) (Version, error) { return Version{}, nil }
+func (s stubSource) FindByDeveloper(string) ([]string, error)   { return nil, nil }
+func (s stubSource) Download(Version) (io.ReadCloser, error) {
+	return io.NopCloser(strings.NewReader("")), nil
+}
 
 func TestRegisterValidatesNameAndDuplicates(t *testing.T) {
 	oldSources := sources
@@ -105,8 +107,7 @@ func TestReadBody(t *testing.T) {
 }
 
 func TestCreateResponseReader(t *testing.T) {
-	oldTransport := http.DefaultClient.Transport
-	http.DefaultClient.Transport = roundTripperFunc(func(req *http.Request) (*http.Response, error) {
+	doer := doerFunc(func(req *http.Request) (*http.Response, error) {
 		return &http.Response{
 			StatusCode: http.StatusOK,
 			Status:     "200 OK",
@@ -115,15 +116,12 @@ func TestCreateResponseReader(t *testing.T) {
 			Request:    req,
 		}, nil
 	})
-	t.Cleanup(func() {
-		http.DefaultClient.Transport = oldTransport
-	})
 
 	req, err := http.NewRequest(http.MethodGet, "https://example.com", nil)
 	if err != nil {
 		t.Fatalf("unexpected request error: %v", err)
 	}
-	reader, err := createResponseReader(req)
+	reader, err := createResponseReader(doer, req)
 	if err != nil {
 		t.Fatalf("unexpected createResponseReader error: %v", err)
 	}
@@ -138,8 +136,7 @@ func TestCreateResponseReader(t *testing.T) {
 }
 
 func TestCreateResponseReaderNon200(t *testing.T) {
-	oldTransport := http.DefaultClient.Transport
-	http.DefaultClient.Transport = roundTripperFunc(func(req *http.Request) (*http.Response, error) {
+	doer := doerFunc(func(req *http.Request) (*http.Response, error) {
 		return &http.Response{
 			StatusCode: http.StatusBadGateway,
 			Status:     "502 Bad Gateway",
@@ -148,15 +145,12 @@ func TestCreateResponseReaderNon200(t *testing.T) {
 			Request:    req,
 		}, nil
 	})
-	t.Cleanup(func() {
-		http.DefaultClient.Transport = oldTransport
-	})
 
 	req, err := http.NewRequest(http.MethodGet, "https://example.com", nil)
 	if err != nil {
 		t.Fatalf("unexpected request error: %v", err)
 	}
-	if _, err := createResponseReader(req); err == nil {
+	if _, err := createResponseReader(doer, req); err == nil {
 		t.Fatalf("expected non-200 error")
 	}
 }

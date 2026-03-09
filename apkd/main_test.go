@@ -2,6 +2,7 @@ package main
 
 import (
 	"path/filepath"
+	"reflect"
 	"strings"
 	"testing"
 )
@@ -51,5 +52,28 @@ func TestSanitizedAndAbsoluteNameWarnsOnInvalidName(t *testing.T) {
 	}
 	if filepath.Base(got) != "bad-name.apk" {
 		t.Fatalf("expected file name %q, got %q", "bad-name.apk", filepath.Base(got))
+	}
+}
+
+func TestParseSourceProxyEntries(t *testing.T) {
+	got, err := parseSourceProxyEntries([]string{
+		"rustore=http://127.0.0.1:8080",
+		"FDROID=http://127.0.0.1:8081",
+	})
+	if err != nil {
+		t.Fatalf("unexpected parse error: %v", err)
+	}
+	expected := map[string]string{
+		"rustore": "http://127.0.0.1:8080",
+		"fdroid":  "http://127.0.0.1:8081",
+	}
+	if !reflect.DeepEqual(got, expected) {
+		t.Fatalf("unexpected parsed source proxies: got=%v expected=%v", got, expected)
+	}
+}
+
+func TestParseSourceProxyEntriesInvalid(t *testing.T) {
+	if _, err := parseSourceProxyEntries([]string{"rustore:http://127.0.0.1:8080"}); err == nil {
+		t.Fatalf("expected parse error for invalid entry format")
 	}
 }

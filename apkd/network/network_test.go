@@ -138,3 +138,132 @@ func TestReadAndRestoreBodyNilResponse(t *testing.T) {
 		t.Fatalf("expected error for nil response body")
 	}
 }
+
+func TestConfigureProxies(t *testing.T) {
+	proxyConfigMu.Lock()
+	oldGlobalProxyURL := globalProxyURL
+	oldSourceProxyURLs := sourceProxyURLs
+	proxyConfigMu.Unlock()
+	t.Cleanup(func() {
+		proxyConfigMu.Lock()
+		globalProxyURL = oldGlobalProxyURL
+		sourceProxyURLs = oldSourceProxyURLs
+		proxyConfigMu.Unlock()
+	})
+
+	if err := ConfigureProxies("http://127.0.0.1:8080", map[string]string{
+		"rustore": "http://127.0.0.1:9090",
+	}, false); err != nil {
+		t.Fatalf("unexpected configure proxies error: %v", err)
+	}
+
+	req, err := http.NewRequest(http.MethodGet, "https://example.com", nil)
+	if err != nil {
+		t.Fatalf("unexpected request error: %v", err)
+	}
+
+	rustoreClient := DefaultClientForSource("rustore")
+	rustoreHTTPClient, ok := rustoreClient.doer.(*http.Client)
+	if !ok {
+		t.Fatalf("unexpected doer type: %T", rustoreClient.doer)
+	}
+	rustoreTransport, ok := rustoreHTTPClient.Transport.(*http.Transport)
+	if !ok {
+		t.Fatalf("unexpected transport type: %T", rustoreHTTPClient.Transport)
+	}
+	rustoreProxyURL, err := rustoreTransport.Proxy(req)
+	if err != nil {
+		t.Fatalf("unexpected rustore proxy resolve error: %v", err)
+	}
+	if rustoreProxyURL == nil || rustoreProxyURL.String() != "http://127.0.0.1:9090" {
+		t.Fatalf("unexpected rustore proxy URL: %v", rustoreProxyURL)
+	}
+
+	fdroidClient := DefaultClientForSource("fdroid")
+	fdroidHTTPClient, ok := fdroidClient.doer.(*http.Client)
+	if !ok {
+		t.Fatalf("unexpected doer type: %T", fdroidClient.doer)
+	}
+	fdroidTransport, ok := fdroidHTTPClient.Transport.(*http.Transport)
+	if !ok {
+		t.Fatalf("unexpected transport type: %T", fdroidHTTPClient.Transport)
+	}
+	fdroidProxyURL, err := fdroidTransport.Proxy(req)
+	if err != nil {
+		t.Fatalf("unexpected fdroid proxy resolve error: %v", err)
+	}
+	if fdroidProxyURL == nil || fdroidProxyURL.String() != "http://127.0.0.1:8080" {
+		t.Fatalf("unexpected fdroid proxy URL: %v", fdroidProxyURL)
+	}
+}
+
+func TestConfigureProxiesInvalidURL(t *testing.T) {
+	if err := ConfigureProxies("://bad", nil, false); err == nil {
+		t.Fatalf("expected error for invalid global proxy URL")
+	}
+	if err := ConfigureProxies("", map[string]string{"fdroid": "://bad"}, false); err == nil {
+		t.Fatalf("expected error for invalid source proxy URL")
+	}
+}
+
+func TestConfigureProxiesWithInsecureSkipVerify(t *testing.T) {
+	proxyConfigMu.Lock()
+	oldGlobalProxyURL := globalProxyURL
+	oldSourceProxyURLs := sourceProxyURLs
+	oldProxyInsecureSkipVerify := proxyInsecureSkipVerify
+	proxyConfigMu.Unlock()
+	t.Cleanup(func() {
+		proxyConfigMu.Lock()
+		globalProxyURL = oldGlobalProxyURL
+		sourceProxyURLs = oldSourceProxyURLs
+		proxyInsecureSkipVerify = oldProxyInsecureSkipVerify
+		proxyConfigMu.Unlock()
+	})
+
+	if err := ConfigureProxies("http://127.0.0.1:8080", nil, true); err != nil {
+		t.Fatalf("unexpected configure proxies error: %v", err)
+	}
+	client := DefaultClientForSource("fdroid")
+	httpClient, ok := client.doer.(*http.Client)
+	if !ok {
+		t.Fatalf("unexpected doer type: %T", client.doer)
+	}
+	transport, ok := httpClient.Transport.(*http.Transport)
+	if !ok {
+		t.Fatalf("unexpected transport type: %T", httpClient.Transport)
+	}
+	if transport.TLSClientConfig == nil || !transport.TLSClientConfig.InsecureSkipVerify {
+		t.Fatalf("expected InsecureSkipVerify=true when proxy insecure mode is enabled")
+	}
+}
+
+func TestConfigureProxiesWithoutInsecureSkipVerify(t *testing.T) {
+	proxyConfigMu.Lock()
+	oldGlobalProxyURL := globalProxyURL
+	oldSourceProxyURLs := sourceProxyURLs
+	oldProxyInsecureSkipVerify := proxyInsecureSkipVerify
+	proxyConfigMu.Unlock()
+	t.Cleanup(func() {
+		proxyConfigMu.Lock()
+		globalProxyURL = oldGlobalProxyURL
+		sourceProxyURLs = oldSourceProxyURLs
+		proxyInsecureSkipVerify = oldProxyInsecureSkipVerify
+		proxyConfigMu.Unlock()
+	})
+
+	if err := ConfigureProxies("http://127.0.0.1:8080", nil, false); err != nil {
+		t.Fatalf("unexpected configure proxies error: %v", err)
+	}
+	client := DefaultClientForSource("fdroid")
+	httpClient, ok := client.doer.(*http.Client)
+	if !ok {
+		t.Fatalf("unexpected doer type: %T", client.doer)
+	}
+	transport, ok := httpClient.Transport.(*http.Transport)
+	if !ok {
+		t.Fatalf("unexpected transport type: %T", httpClient.Transport)
+	}
+	if transport.TLSClientConfig != nil && transport.TLSClientConfig.InsecureSkipVerify {
+		t.Fatalf("expected InsecureSkipVerify=false when proxy insecure mode is disabled")
+	}
+}
