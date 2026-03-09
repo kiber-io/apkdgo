@@ -1,0 +1,59 @@
+# This workflow will build a golang project
+# For more information see: https://docs.github.com/en/actions/automating-builds-and-tests/building-and-testing-go
+
+name: Go
+
+on:
+  push:
+    branches: [ "main" ]
+  pull_request:
+    branches: [ "main" ]
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        go: ["1.25.x"]
+        include:
+          - os: linux
+            arch: amd64
+            run_tests: true
+          - os: linux
+            arch: arm64
+            run_tests: false
+          - os: windows
+            arch: amd64
+            run_tests: false
+    steps:
+    - uses: actions/checkout@v4
+
+    - name: Set up Go
+      uses: actions/setup-go@v5
+      with:
+        go-version: ${{ matrix.go }}
+        cache: true
+
+    - name: Test (linux/amd64 only)
+      if: ${{ matrix.run_tests }}
+      run: go test -v ./apkd
+
+    - name: Build
+      shell: bash
+      run: |
+        set -euo pipefail
+        mkdir -p dist
+        EXT=""
+        if [ "${{ matrix.os }}" = "windows" ]; then
+          EXT=".exe"
+        fi
+
+        GOOS=${{ matrix.os }} GOARCH=${{ matrix.arch }} \
+          go build -v -o "dist/apkd-${{ matrix.os }}-${{ matrix.arch }}${EXT}" ./apkd
+
+    - name: Upload artifact
+      uses: actions/upload-artifact@v4
+      with:
+        name: apkd-${{ matrix.os }}-${{ matrix.arch }}
+        path: dist/*
