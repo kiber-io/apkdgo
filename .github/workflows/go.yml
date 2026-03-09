@@ -23,13 +23,7 @@ jobs:
 
     steps:      
     - uses: actions/checkout@v4
-
-    - name: Show matrix
-      run: |
-        echo "os=${{ matrix.os }}"
-        echo "arch=${{ matrix.arch }}"
-        echo "go=${{ matrix.go }}"
-
+    
     - name: Set up Go
       uses: actions/setup-go@v5
       with:
@@ -44,19 +38,30 @@ jobs:
       shell: bash
       run: |
         set -euo pipefail
-        mkdir -p dist
+
+        os="${{ matrix.os }}"
+        arch="${{ matrix.arch }}"
+        OUTPUT_DIR="dist"
+        
+        mkdir -p "$OUTPUT_DIR"
         EXT=""
-        if [ "${{ matrix.os }}" = "windows" ]; then
-          EXT=".exe"
-        fi
+        if [ "${{ matrix.os }}" = "windows" ]; then EXT=".exe"; fi
 
-        OUT="dist/apkd-${{ matrix.os }}-${{ matrix.arch }}${EXT}"
+        output_name="apkd-${os}-${arch}${EXT}"
 
-        GOOS=${{ matrix.os }} GOARCH=${{ matrix.arch }} \
-          go build -v -o "${OUT}" ./apkd
+        COMMIT="${{ github.event.pull_request.head.sha }}"
+        SHORT_COMMIt="${COMMIT:0:9}"
+        VERSION="dev-${SHORT_COMMIT}"
 
-        ls -la dist
-        file "${OUT}" || true
+        BUILD_DATE="$(date -u +'%Y-%m-%dT%H:%M:%SZ')"
+
+        GOOS=${os} GOARCH=${arch} CGO_ENABLED=0 \
+          go build -trimpath -v -o "$OUTPUT_DIR/$output_name" \
+          -ldflags "-s -w \
+            -X main.version=$VERSION \
+            -X main.commit=$COMMIT \
+            -X main.buildDate=$BUILD_DATE" \
+          ./apkd
 
     - name: Upload artifact
       uses: actions/upload-artifact@v4
