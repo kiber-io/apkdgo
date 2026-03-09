@@ -344,3 +344,72 @@ func TestConfigureProxiesWithoutInsecureSkipVerify(t *testing.T) {
 		t.Fatalf("expected InsecureSkipVerify=false when proxy insecure mode is disabled")
 	}
 }
+
+func TestConfigureClientDefaults(t *testing.T) {
+	clientDefaultsMu.Lock()
+	oldTimeout := defaultClientTimeout
+	oldRetry := cloneRetryPolicy(defaultRetryPolicy)
+	clientDefaultsMu.Unlock()
+	t.Cleanup(func() {
+		clientDefaultsMu.Lock()
+		defaultClientTimeout = oldTimeout
+		defaultRetryPolicy = oldRetry
+		clientDefaultsMu.Unlock()
+	})
+
+	timeout := 42 * time.Second
+	retry := &RetryPolice{
+		MaxAttempts: 3,
+		Delay:       250,
+		MaxDelay:    1000,
+		RetryStatus: []int{429, 503},
+	}
+	if err := ConfigureClientDefaults(&timeout, retry); err != nil {
+		t.Fatalf("unexpected configure client defaults error: %v", err)
+	}
+	client := DefaultClientForSource("fdroid")
+	httpClient, ok := client.doer.(*http.Client)
+	if !ok {
+		t.Fatalf("unexpected doer type: %T", client.doer)
+	}
+	if httpClient.Timeout != timeout {
+		t.Fatalf("expected timeout %v, got %v", timeout, httpClient.Timeout)
+	}
+	if client.retry.MaxAttempts != 3 || client.retry.Delay != 250 || client.retry.MaxDelay != 1000 {
+		t.Fatalf("unexpected retry policy: %+v", client.retry)
+	}
+}
+
+func TestConfigureSourceHeaderOverrides(t *testing.T) {
+	sourceHeadersMu.Lock()
+	oldOverrides := sourceHeaderOverrides
+	sourceHeadersMu.Unlock()
+	t.Cleanup(func() {
+		sourceHeadersMu.Lock()
+		sourceHeaderOverrides = oldOverrides
+		sourceHeadersMu.Unlock()
+	})
+
+	if err := ConfigureSourceHeaderOverrides(map[string]map[string]string{
+		"RuStore": {
+			"user-agent": "custom-agent",
+			"deviceId":   "custom-id",
+		},
+	}); err != nil {
+		t.Fatalf("unexpected configure source headers error: %v", err)
+	}
+
+	headers := ApplySourceHeaderOverrides("rustore", http.Header{
+		"User-Agent": {"default-agent"},
+		"X-Test":     {"1"},
+	})
+	if got := headers.Get("User-Agent"); got != "custom-agent" {
+		t.Fatalf("expected overridden User-Agent, got %q", got)
+	}
+	if got := headers.Get("deviceId"); got != "custom-id" {
+		t.Fatalf("expected configured deviceId, got %q", got)
+	}
+	if got := headers.Get("X-Test"); got != "1" {
+		t.Fatalf("expected existing header to be preserved, got %q", got)
+	}
+}

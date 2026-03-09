@@ -2,6 +2,7 @@ package main
 
 import (
 	"fmt"
+	"maps"
 	"os"
 	"os/signal"
 	"path/filepath"
@@ -11,6 +12,7 @@ import (
 	"strings"
 	"sync/atomic"
 	"syscall"
+	"time"
 
 	"github.com/kiber-io/apkd/apkd/logging"
 	"github.com/kiber-io/apkd/apkd/network"
@@ -27,11 +29,13 @@ var outputFileName string
 var globalProxy string
 var proxyInsecureSkipVerify bool
 var sourceProxyEntries []string
+var configFile string
 var packagesFile string
 var packageNames []string
 var verbosity int
 var listSources bool
 var printVersion bool
+var workers int
 
 var selectedSources []string
 var activeSources []sources.Source
@@ -49,15 +53,39 @@ var rootCmd = cobra.Command{
 	Use:   "apkd",
 	Short: "apkd is a tool for downloading APKs from multiple sources",
 	PreRun: func(cmd *cobra.Command, args []string) {
-		if verbosity == 0 {
-			verbosity = 1 // default verbosity level
-		}
-		logging.Init(verbosity)
 		// Reset mutable global state to keep repeated in-process runs deterministic.
 		packageNamesMap = make(map[string]int)
 		activeSources = nil
 		if printVersion {
 			return
+		}
+		resolvedCfg, configOverrideLogs, err := applyConfig(cmd)
+		if err != nil {
+			fmt.Printf("Error loading config: %v\n", err)
+			os.Exit(1)
+		}
+		if workers <= 0 {
+			fmt.Println("Error validating workers: --workers must be > 0")
+			os.Exit(1)
+		}
+		if verbosity == 0 {
+			verbosity = *builtInDefaultConfig.Defaults.Verbose
+		}
+		logging.Init(verbosity)
+		if resolvedCfg.path != "" {
+			logging.Logi(fmt.Sprintf("Loaded config: %s", resolvedCfg.path))
+		}
+		for _, overrideLog := range configOverrideLogs {
+			logging.Logd(overrideLog)
+		}
+		if err := network.ConfigureSourceHeaderOverrides(resolvedCfg.sourceHeaders); err != nil {
+			fmt.Printf("Error applying source header settings: %v\n", err)
+			os.Exit(1)
+		}
+		network.ResetClientDefaults()
+		if err := network.ConfigureClientDefaults(resolvedCfg.clientTimeout, resolvedCfg.retryPolicy); err != nil {
+			fmt.Printf("Error applying network settings: %v\n", err)
+			os.Exit(1)
 		}
 
 		sourceProxies, err := parseSourceProxyEntries(sourceProxyEntries)
@@ -69,6 +97,7 @@ var rootCmd = cobra.Command{
 			fmt.Printf("Error applying proxy settings: %v\n", err)
 			os.Exit(1)
 		}
+		sources.ConfigureSourceProfiles(resolvedCfg.sourceProfiles)
 
 		if err := sources.InitializeRegisteredSources(); err != nil {
 			fmt.Printf("Error initializing sources: %v\n", err)
@@ -125,7 +154,7 @@ var rootCmd = cobra.Command{
 			selectedSources[i] = strings.ToLower(src)
 		}
 		allSources := sources.GetAll()
-		if err := validateKnownSources(selectedSources, sourceProxies, allSources); err != nil {
+		if err := validateKnownSources(selectedSources, sourceProxies, resolvedCfg.configuredSourceNames, allSources); err != nil {
 			fmt.Printf("Error validating source names: %v\n", err)
 			os.Exit(1)
 		}
@@ -211,7 +240,7 @@ var rootCmd = cobra.Command{
 				os.Exit(0)
 			}()
 
-			tq := NewTaskQueue(3)
+			tq := NewTaskQueue(workers)
 			for packageName, versionCode := range packageNamesMap {
 				tq.AddTask(PackageTask{
 					PackageName: packageName,
@@ -238,6 +267,181 @@ func printSummary() {
 	fmt.Printf("\nSummary: downloaded %d, errors %d\n", downloadSuccessCount.Load(), downloadErrorCount.Load())
 }
 
+type resolvedConfig struct {
+	path                  string
+	sourceHeaders         map[string]map[string]string
+	sourceProfiles        map[string]any
+	configuredSourceNames map[string]struct{}
+	clientTimeout         *time.Duration
+	retryPolicy           *network.RetryPolice
+}
+
+func applyConfig(cmd *cobra.Command) (*resolvedConfig, []string, error) {
+	resolved := &resolvedConfig{
+		sourceHeaders:         make(map[string]map[string]string),
+		sourceProfiles:        make(map[string]any),
+		configuredSourceNames: make(map[string]struct{}),
+	}
+	configPath, err := resolveConfigPath(configFile)
+	if err != nil {
+		return nil, nil, err
+	}
+	cfg, err := loadConfig(configPath)
+	if err != nil {
+		return nil, nil, err
+	}
+	if cfg == nil {
+		return resolved, nil, nil
+	}
+	resolved.path = configPath
+	var overrideLogs []string
+	recordOverride := func(message string) {
+		if resolved.path == "" {
+			return
+		}
+		overrideLogs = append(overrideLogs, message)
+	}
+
+	if cfg.Defaults.Verbose != nil {
+		if cmd.Flags().Changed("verbose") {
+			recordOverride("CLI flag --verbose overrides config value defaults.verbose")
+		} else {
+			verbosity = *cfg.Defaults.Verbose
+		}
+	}
+	if cfg.Defaults.Force != nil {
+		if cmd.Flags().Changed("force") {
+			recordOverride("CLI flag --force overrides config value defaults.force")
+		} else {
+			forceDownload = *cfg.Defaults.Force
+		}
+	}
+	if cfg.Defaults.Dev != nil {
+		if cmd.Flags().Changed("dev") {
+			recordOverride("CLI flag --dev overrides config value defaults.dev")
+		} else {
+			batchDeveloperDownloadMode = *cfg.Defaults.Dev
+		}
+	}
+	if cfg.Defaults.OutputDir != nil {
+		if cmd.Flags().Changed("output-dir") {
+			recordOverride("CLI flag --output-dir overrides config value defaults.output_dir")
+		} else {
+			outputDir = *cfg.Defaults.OutputDir
+		}
+	}
+	if len(cfg.Defaults.Sources) > 0 {
+		if cmd.Flags().Changed("source") {
+			recordOverride("CLI flag --source overrides config value defaults.sources")
+		} else {
+			selectedSources = append([]string(nil), cfg.Defaults.Sources...)
+		}
+	}
+	if cfg.Runtime.Workers != nil {
+		if cmd.Flags().Changed("workers") {
+			recordOverride("CLI flag --workers overrides config value runtime.workers")
+		} else {
+			workers = *cfg.Runtime.Workers
+		}
+	}
+	if cfg.Network.Proxy.Global != nil {
+		if cmd.Flags().Changed("proxy") {
+			recordOverride("CLI flag --proxy overrides config value network.proxy.global")
+		} else {
+			globalProxy = *cfg.Network.Proxy.Global
+		}
+	}
+	if cfg.Network.Proxy.InsecureSkipVerify != nil {
+		if cmd.Flags().Changed("proxy-insecure") {
+			recordOverride("CLI flag --proxy-insecure overrides config value network.proxy.insecure_skip_verify")
+		} else {
+			proxyInsecureSkipVerify = *cfg.Network.Proxy.InsecureSkipVerify
+		}
+	}
+	if len(cfg.Network.Proxy.PerSource) > 0 {
+		if cmd.Flags().Changed("source-proxy") {
+			recordOverride("CLI flag --source-proxy overrides config value network.proxy.per_source")
+		} else {
+			sourceProxyEntries = sourceProxyMapToEntries(cfg.Network.Proxy.PerSource)
+		}
+	}
+	if cfg.Network.Timeout != nil {
+		timeout := *cfg.Network.Timeout
+		resolved.clientTimeout = &timeout
+	}
+	if cfg.Network.Retry.IsSet() {
+		retryPolicy, err := buildRetryPolicy(cfg.Network.Retry)
+		if err != nil {
+			return nil, nil, fmt.Errorf("invalid network.retry configuration: %w", err)
+		}
+		resolved.retryPolicy = retryPolicy
+	}
+	for sourceName, sourceCfg := range cfg.Sources {
+		resolved.configuredSourceNames[sourceName] = struct{}{}
+		if sourceCfg.Profile != nil && sourceCfg.Profile.Node != nil {
+			profile, err := sources.DecodeSourceProfile(sourceName, sourceCfg.Profile.Node)
+			if err != nil {
+				return nil, nil, fmt.Errorf("invalid sources.%s.profile: %w", sourceName, err)
+			}
+			if profile != nil {
+				resolved.sourceProfiles[sourceName] = profile
+			}
+		}
+		if len(sourceCfg.Headers) == 0 {
+			continue
+		}
+		headers := make(map[string]string, len(sourceCfg.Headers))
+		maps.Copy(headers, sourceCfg.Headers)
+		resolved.sourceHeaders[sourceName] = headers
+	}
+
+	return resolved, overrideLogs, nil
+}
+
+func buildRetryPolicy(cfg ConfigRetry) (*network.RetryPolice, error) {
+	retryPolicy := network.DefaultRetryPolice()
+	if cfg.MaxAttempts != nil {
+		retryPolicy.MaxAttempts = *cfg.MaxAttempts
+	}
+	if cfg.DelayMs != nil {
+		retryPolicy.Delay = *cfg.DelayMs
+	}
+	if cfg.MaxDelayMs != nil {
+		retryPolicy.MaxDelay = *cfg.MaxDelayMs
+	}
+	if len(cfg.RetryStatus) > 0 {
+		retryPolicy.RetryStatus = append([]int(nil), cfg.RetryStatus...)
+	}
+	if retryPolicy.MaxAttempts <= 0 {
+		return nil, fmt.Errorf("max_attempts must be > 0")
+	}
+	if retryPolicy.Delay < 0 {
+		return nil, fmt.Errorf("delay_ms must be >= 0")
+	}
+	if retryPolicy.MaxDelay < 0 {
+		return nil, fmt.Errorf("max_delay_ms must be >= 0")
+	}
+	for _, retryStatusCode := range retryPolicy.RetryStatus {
+		if retryStatusCode < 100 || retryStatusCode > 599 {
+			return nil, fmt.Errorf("retry_status contains invalid HTTP status code %d", retryStatusCode)
+		}
+	}
+	return retryPolicy, nil
+}
+
+func sourceProxyMapToEntries(sourceProxies map[string]string) []string {
+	sourceNames := make([]string, 0, len(sourceProxies))
+	for sourceName := range sourceProxies {
+		sourceNames = append(sourceNames, sourceName)
+	}
+	sort.Strings(sourceNames)
+	entries := make([]string, 0, len(sourceNames))
+	for _, sourceName := range sourceNames {
+		entries = append(entries, fmt.Sprintf("%s=%s", sourceName, sourceProxies[sourceName]))
+	}
+	return entries
+}
+
 func parseSourceProxyEntries(entries []string) (map[string]string, error) {
 	result := make(map[string]string, len(entries))
 	for _, entry := range entries {
@@ -259,7 +463,12 @@ func parseSourceProxyEntries(entries []string) (map[string]string, error) {
 	return result, nil
 }
 
-func validateKnownSources(selectedSources []string, sourceProxies map[string]string, allSources map[string]sources.Source) error {
+func validateKnownSources(
+	selectedSources []string,
+	sourceProxies map[string]string,
+	configuredSourceNames map[string]struct{},
+	allSources map[string]sources.Source,
+) error {
 	knownSources := make(map[string]struct{}, len(allSources))
 	for sourceName := range allSources {
 		knownSources[sourceName] = struct{}{}
@@ -276,15 +485,24 @@ func validateKnownSources(selectedSources []string, sourceProxies map[string]str
 			unknownSourceProxies[sourceName] = struct{}{}
 		}
 	}
-	if len(unknownSelected) == 0 && len(unknownSourceProxies) == 0 {
+	unknownConfiguredSources := make(map[string]struct{})
+	for sourceName := range configuredSourceNames {
+		if _, exists := knownSources[sourceName]; !exists {
+			unknownConfiguredSources[sourceName] = struct{}{}
+		}
+	}
+	if len(unknownSelected) == 0 && len(unknownSourceProxies) == 0 && len(unknownConfiguredSources) == 0 {
 		return nil
 	}
-	parts := make([]string, 0, 2)
+	parts := make([]string, 0, 3)
 	if len(unknownSelected) > 0 {
 		parts = append(parts, fmt.Sprintf("--source: %s", joinSortedSet(unknownSelected)))
 	}
 	if len(unknownSourceProxies) > 0 {
 		parts = append(parts, fmt.Sprintf("--source-proxy: %s", joinSortedSet(unknownSourceProxies)))
+	}
+	if len(unknownConfiguredSources) > 0 {
+		parts = append(parts, fmt.Sprintf("config.sources: %s", joinSortedSet(unknownConfiguredSources)))
 	}
 	return fmt.Errorf("unknown source name(s) in %s. Use --list-sources to see available sources", strings.Join(parts, "; "))
 }
@@ -301,13 +519,15 @@ func joinSortedSet(values map[string]struct{}) string {
 func main() {
 	rootCmd.PersistentFlags().StringArrayVarP(&packageNames, "package", "p", []string{}, "package name of the app")
 	rootCmd.PersistentFlags().StringArrayVarP(&selectedSources, "source", "s", []string{}, "specify source(s) for downloading")
-	rootCmd.PersistentFlags().StringVar(&globalProxy, "proxy", "", "global proxy URL for all traffic")
-	rootCmd.PersistentFlags().BoolVar(&proxyInsecureSkipVerify, "proxy-insecure", false, "skip TLS certificate verification for requests sent through proxy")
+	rootCmd.PersistentFlags().StringVar(&configFile, "config", "", "path to YAML config file (defaults to ~/.config/apkd/config.yml if present)")
+	rootCmd.PersistentFlags().StringVar(&globalProxy, "proxy", valueOrZero(builtInDefaultConfig.Network.Proxy.Global), "global proxy URL for all traffic")
+	rootCmd.PersistentFlags().BoolVar(&proxyInsecureSkipVerify, "proxy-insecure", valueOrZero(builtInDefaultConfig.Network.Proxy.InsecureSkipVerify), "skip TLS certificate verification for requests sent through proxy")
 	rootCmd.PersistentFlags().StringArrayVar(&sourceProxyEntries, "source-proxy", []string{}, "source proxy mapping in format source=proxy-url (can be repeated)")
+	rootCmd.PersistentFlags().IntVar(&workers, "workers", *builtInDefaultConfig.Runtime.Workers, "number of worker goroutines")
 	rootCmd.PersistentFlags().StringVarP(&packagesFile, "file", "f", "", "file containing package names")
-	rootCmd.PersistentFlags().BoolVarP(&batchDeveloperDownloadMode, "dev", "", false, "download all apps from developer")
-	rootCmd.PersistentFlags().BoolVarP(&forceDownload, "force", "F", false, "force download even if the file already exists")
-	rootCmd.PersistentFlags().StringVarP(&outputDir, "output-dir", "O", "", "output directory for downloaded APKs")
+	rootCmd.PersistentFlags().BoolVarP(&batchDeveloperDownloadMode, "dev", "", valueOrZero(builtInDefaultConfig.Defaults.Dev), "download all apps from developer")
+	rootCmd.PersistentFlags().BoolVarP(&forceDownload, "force", "F", valueOrZero(builtInDefaultConfig.Defaults.Force), "force download even if the file already exists")
+	rootCmd.PersistentFlags().StringVarP(&outputDir, "output-dir", "O", valueOrZero(builtInDefaultConfig.Defaults.OutputDir), "output directory for downloaded APKs")
 	rootCmd.PersistentFlags().StringVarP(&outputFileName, "output-file", "o", "", "output file name for downloaded APKs")
 	rootCmd.PersistentFlags().CountVarP(&verbosity, "verbose", "v", "Set verbosity level. Use -v or -vv for more verbosity")
 	rootCmd.PersistentFlags().BoolVarP(&listSources, "list-sources", "l", false, "list available sources")

@@ -87,7 +87,7 @@ func TestValidateKnownSourcesValid(t *testing.T) {
 	}
 	err := validateKnownSources([]string{"fdroid"}, map[string]string{
 		"rustore": "http://127.0.0.1:8080",
-	}, allSources)
+	}, nil, allSources)
 	if err != nil {
 		t.Fatalf("unexpected validation error: %v", err)
 	}
@@ -97,7 +97,7 @@ func TestValidateKnownSourcesUnknownSelected(t *testing.T) {
 	allSources := map[string]sources.Source{
 		"fdroid": nil,
 	}
-	err := validateKnownSources([]string{"proxy"}, nil, allSources)
+	err := validateKnownSources([]string{"proxy"}, nil, nil, allSources)
 	if err == nil {
 		t.Fatalf("expected validation error for unknown --source value")
 	}
@@ -112,11 +112,26 @@ func TestValidateKnownSourcesUnknownSourceProxy(t *testing.T) {
 	}
 	err := validateKnownSources([]string{"fdroid"}, map[string]string{
 		"proxy": "http://127.0.0.1:8080",
-	}, allSources)
+	}, nil, allSources)
 	if err == nil {
 		t.Fatalf("expected validation error for unknown --source-proxy value")
 	}
 	if !strings.Contains(err.Error(), "--source-proxy: proxy") {
+		t.Fatalf("unexpected error text: %v", err)
+	}
+}
+
+func TestValidateKnownSourcesUnknownConfigSource(t *testing.T) {
+	allSources := map[string]sources.Source{
+		"fdroid": nil,
+	}
+	err := validateKnownSources([]string{"fdroid"}, nil, map[string]struct{}{
+		"proxy": {},
+	}, allSources)
+	if err == nil {
+		t.Fatalf("expected validation error for unknown source in config")
+	}
+	if !strings.Contains(err.Error(), "config.sources: proxy") {
 		t.Fatalf("unexpected error text: %v", err)
 	}
 }

@@ -29,6 +29,13 @@ apkd [flags]
   apkd -s apkpure -p com.example.app
   ```
 
+- `--config`:
+  Path to YAML config file. CLI flags override config values.
+  If not specified, apkd tries `~/.config/apkd/config.yml`. Example:
+  ```bash
+  apkd --config ./apkd.yaml -p com.example.app
+  ```
+
 - `--file`, `-f`:
   Provide a file containing a list of package names. Example:
   ```bash
@@ -69,6 +76,12 @@ apkd [flags]
   Set proxy URL for a specific source in format `source=proxy-url` (can be repeated). Example:
   ```bash
   apkd --source-proxy rustore=http://127.0.0.1:8081 --source-proxy fdroid=http://127.0.0.1:8082 -p com.example.app
+  ```
+
+- `--workers`:
+  Number of worker goroutines for task processing. Must be greater than 0. Example:
+  ```bash
+  apkd --workers 5 -p com.example.app
   ```
 
 - `--proxy-insecure`:
@@ -116,6 +129,61 @@ apkd --proxy http://127.0.0.1:8080 --source-proxy rustore=http://127.0.0.1:8081 
 Use intercepting proxy with disabled TLS verification:
 ```bash
 apkd --proxy http://127.0.0.1:8080 --proxy-insecure -p org.fdroid.fdroid
+```
+
+Use config defaults and override one value from CLI:
+```bash
+apkd --config ./apkd.yaml --proxy http://127.0.0.1:8080 -p org.fdroid.fdroid
+```
+
+## Configuration
+
+Config format is YAML (`version: 1`). Precedence is:
+
+1. CLI flags
+2. Config values
+3. Built-in code defaults
+
+When a CLI flag overrides a config value, the tool logs it.
+
+Default config lookup path (when `--config` is omitted):
+- `~/.config/apkd/config.yml`
+
+Example `apkd.yaml`:
+
+```yaml
+version: 1
+
+defaults:
+  sources: [rustore, fdroid]
+  output_dir: ./downloads
+  force: false
+  verbose: 1
+
+runtime:
+  workers: 3
+
+network:
+  timeout: 30s
+  retry:
+    max_attempts: 10
+    delay_ms: 1000
+    max_delay_ms: 10000
+    retry_status: [429, 500, 502, 503, 504]
+  proxy:
+    global: http://127.0.0.1:8080
+    insecure_skip_verify: false
+    per_source:
+      rustore: http://127.0.0.1:8081
+
+sources:
+  rustore:
+    profile:
+      app_version: "1.93.0.3"
+      app_version_code: "1093003"
+    headers:
+      User-Agent: "RuStore/1.93.0.3 (Android 14; SDK 34; arm64-v8a; Pixel 7; ru)"
+      ruStoreVerCode: "1093003"
 ```
 
 ## License

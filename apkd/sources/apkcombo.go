@@ -215,9 +215,10 @@ func (s *ApkCombo) FindByPackage(packageName string, versionCode int) (Version, 
 			return true
 		}
 		fileTypeText := strings.TrimSpace(fileTypeBlock.Text())
-		if fileTypeText == "APK" {
+		switch fileTypeText {
+		case "APK":
 			fileType = APK
-		} else if fileTypeText == "XAPK" {
+		case "XAPK":
 			fileType = XAPK
 		}
 		if fileType == "" {
@@ -289,9 +290,10 @@ func (s *ApkCombo) FindByDeveloper(developerId string) ([]string, error) {
 func newApkComboSource() (Source, error) {
 	s := &ApkCombo{}
 	s.Source = s
-	s.Net = network.DefaultClientForSource(s.Name()).WithDefaultHeaders(http.Header{
+	headers := network.ApplySourceHeaderOverrides(s.Name(), http.Header{
 		"User-Agent": {browsers.GetRandomUserAgent()},
 	})
+	s.Net = network.DefaultClientForSource(s.Name()).WithDefaultHeaders(headers)
 	return s, nil
 }
 
