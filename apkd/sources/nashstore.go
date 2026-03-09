@@ -224,23 +224,23 @@ func (s *NashStore) FindByDeveloper(developerId string) ([]string, error) {
 
 func newNashStoreSource() (Source, error) {
 	s := &NashStore{
-		device: devices.GetRandomDevice(),
+		device: devices.RandomDevice(),
 	}
 	s.Source = s
 	tok := s.answer42()
 	appHeader := map[string]any{
-		"androidId":   s.device.GenerateAndroidID(),
-		"apiLevel":    s.device.BuildVersionSdkInt,
+		"androidId":   s.device.AndroidID,
+		"apiLevel":    s.device.SDKInt,
 		"baseOs":      "",
-		"buildId":     s.device.BuildId,
+		"buildId":     s.device.BuildID,
 		"carrier":     "MTS",
-		"deviceName":  s.device.BuildModel,
-		"fingerprint": s.device.BuildFingerprint,
+		"deviceName":  s.device.Model,
+		"fingerprint": s.device.Fingerprint,
 		"fontScale":   1,
-		"brand":       s.device.BuildBrand,
-		"deviceId":    s.device.BuildDevice,
-		"width":       s.device.ScreenWidth,
-		"height":      s.device.ScreenHeight,
+		"brand":       s.device.Brand,
+		"deviceId":    s.device.Device,
+		"width":       s.device.Width,
+		"height":      s.device.Height,
 		"scale":       2.625,
 	}
 	appHeaderBytes, err := json.Marshal(appHeader)
@@ -248,7 +248,7 @@ func newNashStoreSource() (Source, error) {
 		return nil, fmt.Errorf("failed to marshal nashstore app header: %w", err)
 	}
 	s.Net = network.DefaultClientForSource(s.Name()).WithDefaultHeaders(http.Header{
-		"User-Agent":    {"Nashstore [com.nashstore][0.0.6][" + cases.Title(language.English).String(s.device.BuildBrand) + "]"},
+		"User-Agent":    {"Nashstore [com.nashstore][0.0.6][" + cases.Title(language.English).String(s.device.Brand) + "]"},
 		"Content-Type":  {"application/json"},
 		"xaccesstoken":  {tok},
 		"Cookie":        {"nashstore_token=" + tok},

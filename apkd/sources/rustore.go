@@ -78,7 +78,7 @@ func (s *RuStore) generateDeviceId() string {
 		}
 	}
 
-	return string(b1) + "--" + string(b2)
+	return string(b1) + "-" + string(b2)
 }
 
 func (s *RuStore) getAppInfo(packageName string) (map[string]any, error) {
@@ -130,10 +130,10 @@ func (s *RuStore) getDownloadLink(appId float64) (string, error) {
 		"appId":                appId,
 		"firstInstall":         true,
 		"mobileServices":       []string{"GMS"},
-		"supportedAbis":        s.device.Platforms,
+		"supportedAbis":        s.device.CPUAbis,
 		"screenDensity":        480,
 		"supportedLocales":     []string{"en_US", "ru_RU"},
-		"sdkVersion":           s.device.BuildVersionSdkInt,
+		"sdkVersion":           s.device.SDKInt,
 		"withoutSplits":        true,
 		"signatureFingerprint": nil,
 	}
@@ -414,19 +414,19 @@ func (s *RuStore) ExtractApkFromZip(zipFile string, outFile string) (retErr erro
 func newRuStoreSource() (Source, error) {
 	s := &RuStore{
 		appsCache: make(map[string]map[string]any),
-		device:    devices.GetRandomDevice(),
+		device:    devices.RandomDevice(),
 	}
 	s.Source = s
-	logger.Logd(fmt.Sprintf("Initialized RuStore source with device: %s %s (Android %s, SDK %d)", s.device.BuildBrand, s.device.BuildModel, s.device.BuildVersionRelease, s.device.BuildVersionSdkInt))
+	logger.Logd(fmt.Sprintf("Initialized RuStore source with device: %s %s (Android %s, SDK %d)", s.device.Manufacturer, s.device.Model, s.device.AndroidVersion, s.device.SDKInt))
 	s.Net = network.DefaultClientForSource(s.Name()).WithDefaultHeaders(http.Header{
-		"User-Agent":             {"RuStore/1.93.0.3 (Android " + s.device.BuildVersionRelease + "; SDK " + strconv.Itoa(s.device.BuildVersionSdkInt) + "; " + s.device.Platforms[0] + "; " + s.device.BuildModel + "; ru)"},
+		"User-Agent":             {fmt.Sprintf("RuStore/1.93.0.3 (Android %s; SDK %d; %s; %s %s; ru)", s.device.AndroidVersion, s.device.SDKInt, s.device.CPUAbis[0], s.device.Manufacturer, s.device.Model)},
 		"deviceId":               {s.generateDeviceId()},
-		"deviceManufacturerName": {s.device.BuildBrand},
-		"deviceModelName":        {s.device.BuildModel},
-		"deviceModel":            {s.device.BuildBrand + " " + s.device.BuildModel},
+		"deviceManufacturerName": {s.device.Manufacturer},
+		"deviceModelName":        {s.device.Model},
+		"deviceModel":            {s.device.Manufacturer + " " + s.device.Model},
 		"firmwareLang":           {"ru"},
-		"androidSdkVer":          {strconv.Itoa(s.device.BuildVersionSdkInt)},
-		"firmwareVer":            {s.device.BuildVersionRelease},
+		"androidSdkVer":          {strconv.Itoa(s.device.SDKInt)},
+		"firmwareVer":            {s.device.AndroidVersion},
 		"deviceType":             {"mobile"},
 		"ruStoreVerCode":         {"1093003"},
 		"Content-Type":           {"application/json; charset=utf-8"},
