@@ -394,6 +394,11 @@ func (c *Client) Do(req *http.Request) (*http.Response, error) {
 			}
 			return resp, nil
 		}
+		if resp != nil && resp.Body != nil {
+			if closeErr := resp.Body.Close(); closeErr != nil {
+				activeLogger.Logd(fmt.Sprintf("%s Failed to close response body before retry: %v", logContext, closeErr))
+			}
+		}
 		if err != nil {
 			lastErr = err
 		}

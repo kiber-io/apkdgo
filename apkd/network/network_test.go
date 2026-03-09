@@ -27,6 +27,27 @@ func (f roundTripFunc) RoundTrip(req *http.Request) (*http.Response, error) {
 	return f(req)
 }
 
+type doFunc func(*http.Request) (*http.Response, error)
+
+func (f doFunc) Do(req *http.Request) (*http.Response, error) {
+	return f(req)
+}
+
+type trackingReadCloser struct {
+	closed     bool
+	closeCalls int
+}
+
+func (b *trackingReadCloser) Read(_ []byte) (int, error) {
+	return 0, io.EOF
+}
+
+func (b *trackingReadCloser) Close() error {
+	b.closed = true
+	b.closeCalls++
+	return nil
+}
+
 func TestDefaultRetryDecider(t *testing.T) {
 	decider := defaultRetryDecider([]int{http.StatusTooManyRequests})
 	req, err := http.NewRequest(http.MethodGet, "https://example.com", nil)
@@ -151,6 +172,67 @@ func TestDoWithWithoutClientTimeoutDisablesHTTPClientTimeout(t *testing.T) {
 	if sawDeadline {
 		t.Fatalf("expected request deadline to be disabled by timeout override")
 	}
+}
+
+func TestDoClosesResponseBodyBeforeRetry(t *testing.T) {
+	firstBody := &trackingReadCloser{}
+	secondBody := &trackingReadCloser{}
+	attempts := 0
+	client := &Client{
+		doer: doFunc(func(req *http.Request) (*http.Response, error) {
+			attempts++
+			switch attempts {
+			case 1:
+				return &http.Response{
+					StatusCode: http.StatusTooManyRequests,
+					Status:     "429 Too Many Requests",
+					Header:     http.Header{},
+					Body:       firstBody,
+					Request:    req,
+				}, nil
+			case 2:
+				return &http.Response{
+					StatusCode: http.StatusOK,
+					Status:     "200 OK",
+					Header:     http.Header{},
+					Body:       secondBody,
+					Request:    req,
+				}, nil
+			default:
+				t.Fatalf("unexpected attempt %d", attempts)
+				return nil, nil
+			}
+		}),
+		retry: &RetryPolice{
+			MaxAttempts: 2,
+			Delay:       0,
+			MaxDelay:    0,
+			RetryStatus: []int{http.StatusTooManyRequests},
+		},
+	}
+
+	req, err := http.NewRequest(http.MethodGet, "https://example.com", nil)
+	if err != nil {
+		t.Fatalf("unexpected request error: %v", err)
+	}
+
+	resp, err := client.Do(req)
+	if err != nil {
+		t.Fatalf("unexpected client error: %v", err)
+	}
+	if resp == nil || resp.StatusCode != http.StatusOK {
+		t.Fatalf("expected final status %d, got %+v", http.StatusOK, resp)
+	}
+	if !firstBody.closed {
+		t.Fatalf("expected retry response body to be closed")
+	}
+	if firstBody.closeCalls != 1 {
+		t.Fatalf("expected retry response body to be closed once, got %d", firstBody.closeCalls)
+	}
+	if secondBody.closed {
+		t.Fatalf("expected final response body to stay open for caller")
+	}
+	resp.Body.Close()
 }
 
 func TestRequestContextHelpers(t *testing.T) {
