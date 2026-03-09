@@ -18,9 +18,9 @@ import (
 var reqSeq uint64
 var logger = logging.Named("network")
 
-func nextRequestID() string {
+func nextRequestID() uint64 {
 	n := atomic.AddUint64(&reqSeq, 1)
-	return fmt.Sprintf("req-%d", n)
+	return n
 }
 
 type Doer interface {
@@ -118,10 +118,7 @@ func (c *Client) Do(req *http.Request) (*http.Response, error) {
 	if reqLogger != nil {
 		activeLogger = reqLogger
 	}
-	logPrefix := fmt.Sprintf("[%s]", reqId)
-	if module != "" {
-		logPrefix = fmt.Sprintf("[%s]%s", module, logPrefix)
-	}
+	logContext := requestLogContext(reqId, module)
 	if c.defaultHeaders != nil {
 		for key, values := range c.defaultHeaders {
 			for _, value := range values {
@@ -129,7 +126,7 @@ func (c *Client) Do(req *http.Request) (*http.Response, error) {
 			}
 		}
 	}
-	activeLogger.Logd(fmt.Sprintf("%s Sending request: %s %s", logPrefix, req.Method, req.URL.String()))
+	activeLogger.Logd(fmt.Sprintf("%s Sending request: %s %s", logContext, req.Method, req.URL.String()))
 	defDecider := defaultRetryDecider(c.retry.RetryStatus)
 	decider := c.retry.RetryIf
 	if reqDecider := retryIfFromRequest(req); reqDecider != nil {
@@ -151,9 +148,9 @@ func (c *Client) Do(req *http.Request) (*http.Response, error) {
 	for attempt := 1; attempt <= c.retry.MaxAttempts; attempt++ {
 		resp, err := c.doer.Do(req)
 		if err == nil {
-			activeLogger.Logd(fmt.Sprintf("%s Received response: %d %s", logPrefix, resp.StatusCode, http.StatusText(resp.StatusCode)))
+			activeLogger.Logd(fmt.Sprintf("%s Received response: %d %s", logContext, resp.StatusCode, http.StatusText(resp.StatusCode)))
 		} else {
-			activeLogger.Logd(fmt.Sprintf("%s Request error: %v", logPrefix, err))
+			activeLogger.Logd(fmt.Sprintf("%s Request error: %v", logContext, err))
 		}
 		if !shouldRetry(resp, err, attempt) {
 			if err != nil {
@@ -172,7 +169,7 @@ func (c *Client) Do(req *http.Request) (*http.Response, error) {
 		}
 
 		delay := backoffWithJitter(c.retry.Delay, c.retry.MaxDelay, attempt)
-		activeLogger.Logw(fmt.Sprintf("%s Attempt %d/%d failed with %s, retrying in %v...", logPrefix, attempt, c.retry.MaxAttempts, reason, delay))
+		activeLogger.Logw(fmt.Sprintf("%s Attempt %d/%d failed with %s, retrying in %v...", logContext, attempt, c.retry.MaxAttempts, reason, delay))
 		select {
 		case <-time.After(delay):
 		case <-req.Context().Done():
@@ -235,6 +232,13 @@ func requestLoggerFromRequest(req *http.Request) *logging.Logger {
 		}
 	}
 	return nil
+}
+
+func requestLogContext(reqID uint64, module string) string {
+	if module == "" {
+		return fmt.Sprintf("req-id=%d", reqID)
+	}
+	return fmt.Sprintf("req-id=%d module=%s", reqID, module)
 }
 
 func backoffWithJitter(baseDelay, maxDelay int, attempt int) time.Duration {
