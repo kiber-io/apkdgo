@@ -21,51 +21,56 @@ jobs:
         os: [linux, windows]
         arch: [amd64, arm64]
 
-    steps:      
-    - uses: actions/checkout@v4
+    steps:
+    - name: Show GitHub context
+      env:
+        GITHUB_CONTEXT: ${{ toJson(github) }}
+      run: echo "$GITHUB_CONTEXT"
+
+    # - uses: actions/checkout@v4
     
-    - name: Set up Go
-      uses: actions/setup-go@v5
-      with:
-        go-version: ${{ matrix.go }}
-        cache: true
+    # - name: Set up Go
+    #   uses: actions/setup-go@v5
+    #   with:
+    #     go-version: ${{ matrix.go }}
+    #     cache: true
 
-    - name: Test (linux/amd64 only)
-      if: ${{ matrix.os == 'linux' && matrix.arch == 'amd64' }}
-      run: go test -v ./apkd
+    # - name: Test (linux/amd64 only)
+    #   if: ${{ matrix.os == 'linux' && matrix.arch == 'amd64' }}
+    #   run: go test -v ./apkd
 
-    - name: Build
-      shell: bash
-      run: |
-        set -euo pipefail
+    # - name: Build
+    #   shell: bash
+    #   run: |
+    #     set -euo pipefail
 
-        os="${{ matrix.os }}"
-        arch="${{ matrix.arch }}"
-        OUTPUT_DIR="dist"
+    #     os="${{ matrix.os }}"
+    #     arch="${{ matrix.arch }}"
+    #     OUTPUT_DIR="dist"
         
-        mkdir -p "$OUTPUT_DIR"
-        EXT=""
-        if [ "${{ matrix.os }}" = "windows" ]; then EXT=".exe"; fi
+    #     mkdir -p "$OUTPUT_DIR"
+    #     EXT=""
+    #     if [ "${{ matrix.os }}" = "windows" ]; then EXT=".exe"; fi
 
-        output_name="apkd-${os}-${arch}${EXT}"
+    #     output_name="apkd-${os}-${arch}${EXT}"
 
-        COMMIT="${{ github.event.pull_request.head.sha }}"
-        SHORT_COMMIT="${COMMIT:0:9}"
-        VERSION="dev-${SHORT_COMMIT}"
+    #     COMMIT="${{ github.event.pull_request.head.sha }}"
+    #     SHORT_COMMIT="${COMMIT:0:9}"
+    #     VERSION="dev-${SHORT_COMMIT}"
 
-        BUILD_DATE="$(date -u +'%Y-%m-%dT%H:%M:%SZ')"
+    #     BUILD_DATE="$(date -u +'%Y-%m-%dT%H:%M:%SZ')"
 
-        GOOS=${os} GOARCH=${arch} CGO_ENABLED=0 \
-          go build -trimpath -v -o "$OUTPUT_DIR/$output_name" \
-          -ldflags "-s -w \
-            -X main.version=$VERSION \
-            -X main.commit=$COMMIT \
-            -X main.buildDate=$BUILD_DATE" \
-          ./apkd
+    #     GOOS=${os} GOARCH=${arch} CGO_ENABLED=0 \
+    #       go build -trimpath -v -o "$OUTPUT_DIR/$output_name" \
+    #       -ldflags "-s -w \
+    #         -X main.version=$VERSION \
+    #         -X main.commit=$COMMIT \
+    #         -X main.buildDate=$BUILD_DATE" \
+    #       ./apkd
 
-    - name: Upload artifact
-      uses: actions/upload-artifact@v4
-      with:
-        name: apkd-${{ matrix.os }}-${{ matrix.arch }}
-        path: dist/apkd-${{ matrix.os }}-${{ matrix.arch }}*
-        if-no-files-found: error
+    # - name: Upload artifact
+    #   uses: actions/upload-artifact@v4
+    #   with:
+    #     name: apkd-${{ matrix.os }}-${{ matrix.arch }}
+    #     path: dist/apkd-${{ matrix.os }}-${{ matrix.arch }}*
+    #     if-no-files-found: error
