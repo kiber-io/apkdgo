@@ -51,7 +51,7 @@ type RetryPolice struct {
 
 func DefaultRetryPolice() *RetryPolice {
 	return &RetryPolice{
-		MaxAttempts: 3,
+		MaxAttempts: 10,
 		Delay:       1000, // milliseconds
 		MaxDelay:    10000,
 		RetryStatus: []int{http.StatusTooManyRequests, http.StatusInternalServerError, http.StatusBadGateway, http.StatusServiceUnavailable, http.StatusGatewayTimeout},
