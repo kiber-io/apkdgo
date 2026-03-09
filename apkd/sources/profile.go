@@ -17,21 +17,22 @@ var sourceProfileDecoders = make(map[string]ProfileDecoder)
 var configuredSourceProfilesMu sync.RWMutex
 var configuredSourceProfiles = make(map[string]any)
 
-func RegisterSourceProfileDecoder(sourceName string, decoder ProfileDecoder) {
+func RegisterSourceProfileDecoder(sourceName string, decoder ProfileDecoder) error {
 	normalizedSourceName := normalizeSourceName(sourceName)
 	if normalizedSourceName == "" {
-		panic("source profile decoder name cannot be empty")
+		return fmt.Errorf("source profile decoder name cannot be empty")
 	}
 	if decoder == nil {
-		panic("source profile decoder cannot be nil")
+		return fmt.Errorf("source profile decoder cannot be nil")
 	}
 
 	sourceProfileDecodersMu.Lock()
 	defer sourceProfileDecodersMu.Unlock()
 	if _, exists := sourceProfileDecoders[normalizedSourceName]; exists {
-		panic(fmt.Sprintf("source profile decoder for %s is already registered", normalizedSourceName))
+		return fmt.Errorf("source profile decoder for %s is already registered", normalizedSourceName)
 	}
 	sourceProfileDecoders[normalizedSourceName] = decoder
+	return nil
 }
 
 func buildSourceProfileDecoderWithDefaults[T any](
@@ -69,8 +70,8 @@ func RegisterSourceProfileDecoderWithDefaults[T any](
 	defaultProfile T,
 	normalize func(*T),
 	validate func(T) error,
-) {
-	RegisterSourceProfileDecoder(sourceName, buildSourceProfileDecoderWithDefaults(defaultProfile, normalize, validate))
+) error {
+	return RegisterSourceProfileDecoder(sourceName, buildSourceProfileDecoderWithDefaults(defaultProfile, normalize, validate))
 }
 
 func DecodeSourceProfile(sourceName string, node *yaml.Node) (any, error) {

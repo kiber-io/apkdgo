@@ -3,6 +3,7 @@ package sources
 import (
 	"compress/gzip"
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -97,6 +98,7 @@ var sourceFactories []SourceFactory
 
 var initializeRegisteredSourcesOnce sync.Once
 var initializeRegisteredSourcesErr error
+var sourceFactoryRegistrationErrors []error
 
 var appVersionRegexp = regexp.MustCompile(`^\d+(\.\d+)*$`)
 
@@ -109,12 +111,19 @@ func RegisterSourceFactory(factory SourceFactory) {
 func RegisterSourceFactoryWithProfile(factory SourceFactory, sourceName string, profileDecoder ProfileDecoder) {
 	RegisterSourceFactory(factory)
 	if profileDecoder != nil {
-		RegisterSourceProfileDecoder(sourceName, profileDecoder)
+		if err := RegisterSourceProfileDecoder(sourceName, profileDecoder); err != nil {
+			sourceFactoryRegistrationErrors = append(sourceFactoryRegistrationErrors, fmt.Errorf("failed to register profile decoder for source %q: %w", sourceName, err))
+		}
 	}
 }
 
 func InitializeRegisteredSources() error {
 	initializeRegisteredSourcesOnce.Do(func() {
+		if len(sourceFactoryRegistrationErrors) > 0 {
+			initializeRegisteredSourcesErr = fmt.Errorf("failed to register source profile decoders: %w", errors.Join(sourceFactoryRegistrationErrors...))
+			return
+		}
+
 		for i, sourceFactory := range sourceFactories {
 			source, err := sourceFactory()
 			if err != nil {

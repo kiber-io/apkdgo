@@ -14,7 +14,7 @@ type testProfile struct {
 
 func TestRegisterSourceProfileDecoderWithDefaults(t *testing.T) {
 	sourceName := "testprofiledecoderdefaults"
-	RegisterSourceProfileDecoder(
+	if err := RegisterSourceProfileDecoder(
 		sourceName,
 		NewProfileDecoderWithDefaults(
 			testProfile{AppVersion: "1.0.0"},
@@ -28,7 +28,9 @@ func TestRegisterSourceProfileDecoderWithDefaults(t *testing.T) {
 				return nil
 			},
 		),
-	)
+	); err != nil {
+		t.Fatalf("failed to register source profile decoder: %v", err)
+	}
 
 	var node yaml.Node
 	if err := yaml.Unmarshal([]byte(`{app_version: " 2.0.0 "}`), &node); err != nil {
@@ -50,7 +52,9 @@ func TestRegisterSourceProfileDecoderWithDefaults(t *testing.T) {
 
 func TestRegisterSourceProfileDecoderWithDefaultsRejectsUnknownField(t *testing.T) {
 	sourceName := "testprofiledecoderunknownfield"
-	RegisterSourceProfileDecoder(sourceName, NewProfileDecoderWithDefaults(testProfile{AppVersion: "1.0.0"}, nil, nil))
+	if err := RegisterSourceProfileDecoder(sourceName, NewProfileDecoderWithDefaults(testProfile{AppVersion: "1.0.0"}, nil, nil)); err != nil {
+		t.Fatalf("failed to register source profile decoder: %v", err)
+	}
 
 	var node yaml.Node
 	if err := yaml.Unmarshal([]byte(`{bad: "x"}`), &node); err != nil {
@@ -76,7 +80,9 @@ func TestRegisterSourceProfileDecoderNormalizesName(t *testing.T) {
 	sourceProfileDecoders = make(map[string]ProfileDecoder)
 	sourceProfileDecodersMu.Unlock()
 
-	RegisterSourceProfileDecoder(" StUb ", NewProfileDecoderWithDefaults(testProfile{AppVersion: "1.0.0"}, nil, nil))
+	if err := RegisterSourceProfileDecoder(" StUb ", NewProfileDecoderWithDefaults(testProfile{AppVersion: "1.0.0"}, nil, nil)); err != nil {
+		t.Fatalf("failed to register source profile decoder: %v", err)
+	}
 
 	var node yaml.Node
 	if err := yaml.Unmarshal([]byte(`{app_version: "2.0.0"}`), &node); err != nil {
