@@ -126,7 +126,7 @@ func (tq *TaskQueue) worker() {
 			tq.markPackageProcessed(t.Version.PackageName)
 			tq.processVersionTask(t)
 		default:
-			addCollectedError(fmt.Sprintf("Unknown task type: %T", t))
+			reportError(fmt.Sprintf("Unknown task type: %T", t))
 		}
 		tq.wg.Done()
 	}
@@ -173,12 +173,9 @@ func (tq *TaskQueue) processPackageTask(task PackageTask) {
 		bar.SetPriority(p)
 	}
 	version, source, errs := tq.findVersion(task.PackageName, task.VersionCode)
-	for _, err := range errs {
-		addCollectedError(fmt.Sprintf("Source: %s, Package: %s, Error: %s", err.SourceName, err.PackageName, err.Err.Error()))
-	}
 	if version == (sources.Version{}) || source == nil {
 		if len(errs) == 0 {
-			addCollectedError(fmt.Sprintf("Package %s not found in active sources", task.PackageName))
+			reportError(fmt.Sprintf("Package %s not found in active sources", task.PackageName))
 		}
 		tq.removeBar(bar)
 		return
@@ -201,7 +198,7 @@ func (tq *TaskQueue) processPackageTask(task PackageTask) {
 		logger.Logd(fmt.Sprintf("Searching for packages by developer %s at source %s", version.DeveloperId, source.Name()))
 		packages, err := source.FindByDeveloper(version.DeveloperId)
 		if err != nil {
-			addCollectedError(fmt.Sprintf("Error finding packages by developer %s at source %s: %v", version.DeveloperId, source.Name(), err))
+			reportError(fmt.Sprintf("Error finding packages by developer %s at source %s: %v", version.DeveloperId, source.Name(), err))
 			tq.removeBar(bar)
 			return
 		}
@@ -249,7 +246,7 @@ func (tq *TaskQueue) processVersionTask(task VersionTask) {
 		outFile = outputFileName
 	} else {
 		if task.Version.Type == "" {
-			addCollectedError(fmt.Sprintf("File type not found for package %s", task.Version.PackageName))
+			reportError(fmt.Sprintf("File type not found for package %s", task.Version.PackageName))
 			tq.removeBar(bar)
 			return
 		}
@@ -261,13 +258,13 @@ func (tq *TaskQueue) processVersionTask(task VersionTask) {
 	}
 	if _, err := os.Stat(outFile); err == nil {
 		if !forceDownload {
-			addCollectedError(fmt.Sprintf("File %s already exists. Use --force to overwrite.", outFile))
+			reportError(fmt.Sprintf("File %s already exists. Use --force to overwrite.", outFile))
 			tq.removeBar(bar)
 			return
 		}
 		logger.Logd(fmt.Sprintf("File %s already exists. Removing...", outFile))
 		if err := os.Remove(outFile); err != nil {
-			addCollectedError(fmt.Sprintf("Error removing existing file %s: %v", outFile, err))
+			reportError(fmt.Sprintf("Error removing existing file %s: %v", outFile, err))
 			tq.removeBar(bar)
 			return
 		}
@@ -275,7 +272,7 @@ func (tq *TaskQueue) processVersionTask(task VersionTask) {
 	logger.Logi(fmt.Sprintf("Downloading package %s from source %s to file %s", task.Version.PackageName, task.Source.Name(), outFile))
 	reader, err := task.Source.Download(task.Version)
 	if err != nil {
-		addCollectedError(fmt.Sprintf("Error downloading package %s from source %s: %v", task.Version.PackageName, task.Source.Name(), err))
+		reportError(fmt.Sprintf("Error downloading package %s from source %s: %v", task.Version.PackageName, task.Source.Name(), err))
 		tq.removeBar(bar)
 		return
 	}
@@ -286,7 +283,7 @@ func (tq *TaskQueue) processVersionTask(task VersionTask) {
 			return
 		}
 		if closeErr := progressReader.Close(); closeErr != nil {
-			logger.Loge(fmt.Sprintf("Error closing download stream for package %s: %v", task.Version.PackageName, closeErr))
+			reportError(fmt.Sprintf("Error closing download stream for package %s: %v", task.Version.PackageName, closeErr))
 		}
 	}()
 	source, isRuStore := task.Source.(*sources.RuStore)
@@ -294,7 +291,7 @@ func (tq *TaskQueue) processVersionTask(task VersionTask) {
 	if isRuStore {
 		downloadPath = outFile + ".download"
 		if err := os.Remove(downloadPath); err != nil && !os.IsNotExist(err) {
-			addCollectedError(fmt.Sprintf("Error removing existing temporary file %s: %v", downloadPath, err))
+			reportError(fmt.Sprintf("Error removing existing temporary file %s: %v", downloadPath, err))
 			tq.removeBar(bar)
 			return
 		}
@@ -302,25 +299,25 @@ func (tq *TaskQueue) processVersionTask(task VersionTask) {
 
 	file, err := os.Create(downloadPath)
 	if err != nil {
-		addCollectedError(fmt.Sprintf("Error creating file %s: %v", downloadPath, err))
+		reportError(fmt.Sprintf("Error creating file %s: %v", downloadPath, err))
 		tq.removeBar(bar)
 		return
 	}
 	if _, err = io.Copy(file, progressReader); err != nil {
 		if closeErr := file.Close(); closeErr != nil {
-			addCollectedError(fmt.Sprintf("Error closing file %s after write error: %v", downloadPath, closeErr))
+			reportError(fmt.Sprintf("Error closing file %s after write error: %v", downloadPath, closeErr))
 		}
-		addCollectedError(fmt.Sprintf("Error saving file %s: %v", downloadPath, err))
+		reportError(fmt.Sprintf("Error saving file %s: %v", downloadPath, err))
 		tq.removeBar(bar)
 		return
 	}
 	if err := file.Close(); err != nil {
-		addCollectedError(fmt.Sprintf("Error closing file %s: %v", downloadPath, err))
+		reportError(fmt.Sprintf("Error closing file %s: %v", downloadPath, err))
 		tq.removeBar(bar)
 		return
 	}
 	if err := progressReader.Close(); err != nil {
-		addCollectedError(fmt.Sprintf("Error closing download stream for package %s: %v", task.Version.PackageName, err))
+		reportError(fmt.Sprintf("Error closing download stream for package %s: %v", task.Version.PackageName, err))
 		tq.removeBar(bar)
 		return
 	}
@@ -329,7 +326,7 @@ func (tq *TaskQueue) processVersionTask(task VersionTask) {
 		// workaround for rustore: sometimes it responds with a zip file in which the APK is stored
 		err := source.ExtractApkFromZip(downloadPath, outFile)
 		if err != nil {
-			addCollectedError(fmt.Sprintf("Error extracting APK from zip file %s: %v", downloadPath, err))
+			reportError(fmt.Sprintf("Error extracting APK from zip file %s: %v", downloadPath, err))
 			tq.removeBar(bar)
 			return
 		}
@@ -337,6 +334,7 @@ func (tq *TaskQueue) processVersionTask(task VersionTask) {
 	}
 	// Complete the bar even when source-reported size is inaccurate.
 	bar.SetTotal(-1, true)
+	reportDownloadSuccess()
 	logger.Logi(fmt.Sprintf("Package %s downloaded successfully", task.Version.PackageName))
 }
 
@@ -365,7 +363,7 @@ func (tq *TaskQueue) findVersion(packageName string, versionCode int) (sources.V
 			if err != nil {
 				var appNotFoundError *sources.AppNotFoundError
 				if !errors.As(err, &appNotFoundError) {
-					logger.Loge(fmt.Sprintf("Error finding package %s at source %s: %v", packageName, src.Name(), err))
+					reportError(fmt.Sprintf("Error finding package %s at source %s: %v", packageName, src.Name(), err))
 					mu.Lock()
 					sourcesErrors = append(sourcesErrors, sources.Error{
 						SourceName:  src.Name(),

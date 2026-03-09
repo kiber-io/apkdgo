@@ -8,7 +8,7 @@ import (
 	"regexp"
 	"strconv"
 	"strings"
-	"sync"
+	"sync/atomic"
 	"syscall"
 
 	"github.com/kiber-io/apkd/apkd/logging"
@@ -33,8 +33,8 @@ var printVersion bool
 var selectedSources []string
 var activeSources []sources.Source
 
-var collectedErrors []string
-var collectedErrorsMu sync.Mutex
+var downloadSuccessCount atomic.Int64
+var downloadErrorCount atomic.Int64
 
 var (
 	version   = "dev"
@@ -182,7 +182,7 @@ var rootCmd = cobra.Command{
 			signal.Notify(sigChan, syscall.SIGINT, syscall.SIGTERM)
 			go func() {
 				<-sigChan
-				printCollectedErrors()
+				printSummary()
 				os.Exit(0)
 			}()
 
@@ -195,33 +195,22 @@ var rootCmd = cobra.Command{
 			}
 
 			tq.Wait()
-			printCollectedErrors()
+			printSummary()
 		}
 	},
 }
 
-func printCollectedErrors() {
-	errorsSnapshot := snapshotCollectedErrors()
-	if len(errorsSnapshot) > 0 {
-		fmt.Println("\nErrors:")
-		for _, err := range errorsSnapshot {
-			fmt.Printf("- %s\n", strings.ReplaceAll(err, "\n", "\\n"))
-		}
-	}
+func reportError(errText string) {
+	downloadErrorCount.Add(1)
+	logging.Loge(strings.ReplaceAll(errText, "\n", "\\n"))
 }
 
-func addCollectedError(errText string) {
-	collectedErrorsMu.Lock()
-	collectedErrors = append(collectedErrors, errText)
-	collectedErrorsMu.Unlock()
+func reportDownloadSuccess() {
+	downloadSuccessCount.Add(1)
 }
 
-func snapshotCollectedErrors() []string {
-	collectedErrorsMu.Lock()
-	defer collectedErrorsMu.Unlock()
-	snapshot := make([]string, len(collectedErrors))
-	copy(snapshot, collectedErrors)
-	return snapshot
+func printSummary() {
+	fmt.Printf("\nSummary: downloaded %d, errors %d\n", downloadSuccessCount.Load(), downloadErrorCount.Load())
 }
 
 func main() {
