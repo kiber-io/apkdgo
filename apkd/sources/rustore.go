@@ -16,7 +16,7 @@ import (
 	"strings"
 
 	"github.com/kiber-io/apkd/apkd/devices"
-	"github.com/kiber-io/apkd/apkd/logger"
+	"github.com/kiber-io/apkd/apkd/logging"
 	"github.com/kiber-io/apkd/apkd/network"
 )
 
@@ -25,6 +25,8 @@ type RuStore struct {
 	appsCache map[string]map[string]any
 	device    devices.Device
 }
+
+var logger = logging.Named("sources.rustore")
 
 func (s *RuStore) Name() string {
 	return "rustore"

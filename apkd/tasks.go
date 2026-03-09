@@ -10,7 +10,7 @@ import (
 	"slices"
 	"sync"
 
-	"github.com/kiber-io/apkd/apkd/logger"
+	"github.com/kiber-io/apkd/apkd/logging"
 	"github.com/kiber-io/apkd/apkd/sources"
 
 	"github.com/vbauerster/mpb/v8"
@@ -18,6 +18,7 @@ import (
 )
 
 var processedDevelopers = make(map[string][]string)
+var logger = logging.Named("tasks")
 
 type Task any
 

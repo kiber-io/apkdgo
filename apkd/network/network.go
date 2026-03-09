@@ -12,10 +12,11 @@ import (
 	"sync/atomic"
 	"time"
 
-	"github.com/kiber-io/apkd/apkd/logger"
+	"github.com/kiber-io/apkd/apkd/logging"
 )
 
 var reqSeq uint64
+var logger = logging.Named("network")
 
 func nextRequestID() string {
 	n := atomic.AddUint64(&reqSeq, 1)

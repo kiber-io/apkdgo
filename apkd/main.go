@@ -10,7 +10,7 @@ import (
 	"strings"
 	"syscall"
 
-	"github.com/kiber-io/apkd/apkd/logger"
+	"github.com/kiber-io/apkd/apkd/logging"
 	"github.com/kiber-io/apkd/apkd/sources"
 
 	"slices"
@@ -47,7 +47,7 @@ var rootCmd = cobra.Command{
 		if verbosity == 0 {
 			verbosity = 1 // default verbosity level
 		}
-		logger.Init(verbosity)
+		logging.Init(verbosity)
 
 		if !printVersion {
 			if err := sources.InitializeRegisteredSources(); err != nil {
