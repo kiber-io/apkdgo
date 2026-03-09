@@ -61,9 +61,6 @@ func (s *FDroid) Download(version Version) (io.ReadCloser, error) {
 	if err != nil {
 		return nil, err
 	}
-	// req.Header.Add("User-Agent", "F-Droid 1.21.1")
-	// req.Header.Add("Accept-Encoding", "gzip")
-	// req.Header.Add("accept-charset", "UTF-8")
 	return createResponseReader(s.Http(), req)
 }
 
@@ -78,10 +75,6 @@ func (s *FDroid) getJson() (map[string]any, error) {
 	if err != nil {
 		return nil, err
 	}
-
-	// req.Header.Add("User-Agent", "F-Droid 1.21.1")
-	// req.Header.Add("Accept-Encoding", "gzip")
-	// req.Header.Add("accept-charset", "UTF-8")
 
 	res, err := s.Net.Do(req)
 
