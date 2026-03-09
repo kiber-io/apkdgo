@@ -1,13 +1,16 @@
 module github.com/kiber-io/apkd
 
-go 1.23.2
+go 1.23.4
 
 require (
+	github.com/lib4u/fake-useragent v1.0.6
 	github.com/spf13/cobra v1.8.1
 	github.com/vbauerster/mpb/v8 v8.9.3
 	golang.org/x/text v0.25.0
 	gopkg.in/yaml.v3 v3.0.1
 )
+
+require golang.org/x/exp v0.0.0-20250106191152-7588d65b2ba8 // indirect
 
 require (
 	github.com/PuerkitoBio/goquery v1.10.2 // direct

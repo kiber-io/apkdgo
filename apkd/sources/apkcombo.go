@@ -9,8 +9,8 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/kiber-io/apkd/apkd/browsers"
 	"github.com/kiber-io/apkd/apkd/network"
+	fakeUserAgent "github.com/lib4u/fake-useragent"
 
 	"github.com/PuerkitoBio/goquery"
 	"github.com/dustin/go-humanize"
@@ -290,8 +290,14 @@ func (s *ApkCombo) FindByDeveloper(developerId string) ([]string, error) {
 func newApkComboSource() (Source, error) {
 	s := &ApkCombo{}
 	s.Source = s
+	ua, err := fakeUserAgent.New()
+	if err != nil {
+		return nil, fmt.Errorf("failed to create fake user agent: %v", err)
+	}
+	randomUA := ua.Filter().Platform(fakeUserAgent.Desktop).Browser(fakeUserAgent.Firefox, fakeUserAgent.Chrome).Get()
+	s.Log().Logd(fmt.Sprintf("Using User-Agent: %s", randomUA))
 	headers := network.ApplySourceHeaderOverrides(s.Name(), http.Header{
-		"User-Agent": {browsers.GetRandomUserAgent()},
+		"User-Agent": {randomUA},
 	})
 	s.Net = network.DefaultClientForSource(s.Name()).WithDefaultHeaders(headers)
 	return s, nil
