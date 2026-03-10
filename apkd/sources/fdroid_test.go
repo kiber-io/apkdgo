@@ -1,6 +1,10 @@
 package sources
 
-import "testing"
+import (
+	"net/http"
+	"strings"
+	"testing"
+)
 
 func testFDroidData() map[string]any {
 	return map[string]any{
@@ -127,5 +131,55 @@ func TestFDroidFindNeededVersionNotFound(t *testing.T) {
 	}
 	if _, ok := err.(*AppNotFoundError); !ok {
 		t.Fatalf("expected AppNotFoundError, got %T", err)
+	}
+}
+
+func TestFDroidGetJsonClosesBodyOnSuccess(t *testing.T) {
+	body := &trackingReadCloser{
+		Reader: strings.NewReader(`{"packages":{"com.example.app":{"metadata":{"authorName":"Acme"},"versions":{}}}}`),
+	}
+	s := &FDroid{}
+	s.Source = s
+	s.Net = doerFunc(func(req *http.Request) (*http.Response, error) {
+		return &http.Response{
+			StatusCode: http.StatusOK,
+			Status:     "200 OK",
+			Header:     http.Header{},
+			Body:       body,
+			Request:    req,
+		}, nil
+	})
+
+	_, err := s.getJson()
+	if err != nil {
+		t.Fatalf("unexpected getJson error: %v", err)
+	}
+	if !body.closed {
+		t.Fatalf("expected response body to be closed")
+	}
+}
+
+func TestFDroidGetJsonClosesBodyOnNon200(t *testing.T) {
+	body := &trackingReadCloser{
+		Reader: strings.NewReader("bad gateway"),
+	}
+	s := &FDroid{}
+	s.Source = s
+	s.Net = doerFunc(func(req *http.Request) (*http.Response, error) {
+		return &http.Response{
+			StatusCode: http.StatusBadGateway,
+			Status:     "502 Bad Gateway",
+			Header:     http.Header{},
+			Body:       body,
+			Request:    req,
+		}, nil
+	})
+
+	_, err := s.getJson()
+	if err == nil {
+		t.Fatalf("expected getJson error for non-200 response")
+	}
+	if !body.closed {
+		t.Fatalf("expected response body to be closed on non-200 response")
 	}
 }

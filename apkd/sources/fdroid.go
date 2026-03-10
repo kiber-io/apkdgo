@@ -76,22 +76,25 @@ func (s *FDroid) getJson() (map[string]any, error) {
 		return nil, err
 	}
 
-	res, err := s.Net.Do(req)
+	res, err := s.Http().Do(req)
 
 	if err != nil {
 		return nil, err
 	}
-	if res.StatusCode != http.StatusOK {
-		return nil, fmt.Errorf("error: %s", res.Status)
-	}
-	var reader io.ReadCloser = res.Body
+	defer res.Body.Close()
 
+	var reader io.ReadCloser = res.Body
 	if res.Header.Get("Content-Encoding") == "gzip" {
 		gzipReader, err := gzip.NewReader(res.Body)
 		if err != nil {
 			return nil, fmt.Errorf("error creating gzip reader: %w", err)
 		}
 		reader = gzipReader
+		defer reader.Close()
+	}
+
+	if res.StatusCode != http.StatusOK {
+		return nil, fmt.Errorf("error: %s", res.Status)
 	}
 
 	data, err := io.ReadAll(reader)
