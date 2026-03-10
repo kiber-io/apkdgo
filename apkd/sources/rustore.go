@@ -203,7 +203,11 @@ func (s *RuStore) getDownloadLink(appId float64) (string, error) {
 	if result["code"] != "OK" {
 		return "", errors.New(result["message"].(string))
 	}
-	downloadUrl := result["body"].(map[string]any)["downloadUrls"].([]any)[0].(map[string]any)
+	downloadUrls := result["body"].(map[string]any)["downloadUrls"].([]any)
+	if len(downloadUrls) == 0 {
+		return "", errors.New("no download URLs found in response")
+	}
+	downloadUrl := downloadUrls[0].(map[string]any)
 	return downloadUrl["url"].(string), nil
 }
 
