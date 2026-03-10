@@ -121,7 +121,7 @@ func (s *NashStore) getAppInfo(packageName string) (AppInfoNashStore, error) {
 		return appInfo, err
 	}
 	if res.StatusCode != http.StatusOK {
-		return appInfo, fmt.Errorf("failed to get app info (" + res.Status + "): " + string(body))
+		return appInfo, fmt.Errorf("%s", "failed to get app info ("+res.Status+"): "+string(body))
 	}
 	var result map[string]any
 	if err := json.Unmarshal(body, &result); err != nil {
@@ -216,7 +216,7 @@ func (s *NashStore) FindByDeveloper(developerId string) ([]string, error) {
 		return nil, err
 	}
 	if res.StatusCode != http.StatusOK {
-		return nil, fmt.Errorf("failed to get app info (" + res.Status + "): " + string(body))
+		return nil, fmt.Errorf("%s", "failed to get app info ("+res.Status+"): "+string(body))
 	}
 	var result map[string]any
 	if err := json.Unmarshal(body, &result); err != nil {
