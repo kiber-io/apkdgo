@@ -201,7 +201,7 @@ func (tq *TaskQueue) processPackageTask(task PackageTask) {
 	if task.Bar != nil {
 		p := task.Bar.ID() + 3000
 		task.Bar.SetPriority(p)
-		task.Bar.Abort(true)
+		tq.removeBar(task.Bar)
 	} else {
 		p := 3000 - bar.ID()
 		bar.SetPriority(p)
@@ -268,7 +268,7 @@ func (tq *TaskQueue) processVersionTask(task VersionTask) {
 		),
 	)
 	if task.Bar != nil {
-		task.Bar.Abort(true)
+		tq.removeBar(task.Bar)
 		p := 3000 - task.Bar.ID()
 		task.Bar.SetPriority(p)
 	} else {
@@ -366,7 +366,6 @@ func (tq *TaskQueue) processVersionTask(task VersionTask) {
 			tq.removeBar(bar)
 			return
 		}
-
 	}
 	// Complete the bar even when source-reported size is inaccurate.
 	bar.SetTotal(-1, true)
@@ -375,10 +374,7 @@ func (tq *TaskQueue) processVersionTask(task VersionTask) {
 }
 
 func (tq *TaskQueue) removeBar(prevBar *mpb.Bar) {
-	if prevBar == nil {
-		return
-	}
-	if prevBar.Aborted() {
+	if prevBar == nil || prevBar.Aborted() {
 		return
 	}
 	prevBar.Abort(true)
