@@ -141,8 +141,22 @@ func (s *NashStore) getAppInfo(packageName string) (AppInfoNashStore, error) {
 			if err := json.Unmarshal(jsonAppInfo, &appInfo.App); err != nil {
 				return appInfo, err
 			}
-			appInfo2 := list[0].(map[string]any)
-			appInfo.App.Size = uint64(appInfo2["size"].(float64))
+			appInfoMap, ok := list[0].(map[string]any)
+			if !ok {
+				return appInfo, fmt.Errorf("failed to parse app info: unexpected list element type %T", list[0])
+			}
+			sizeRaw, exists := appInfoMap["size"]
+			if !exists {
+				return appInfo, fmt.Errorf("failed to parse app info: field size is missing")
+			}
+			size, ok := sizeRaw.(float64)
+			if !ok {
+				return appInfo, fmt.Errorf("failed to parse app info: field size has unexpected type %T", sizeRaw)
+			}
+			if size < 0 {
+				return appInfo, fmt.Errorf("failed to parse app info: field size must be >= 0")
+			}
+			appInfo.App.Size = uint64(size)
 			return appInfo, nil
 		}
 	}
@@ -208,27 +222,51 @@ func (s *NashStore) FindByDeveloper(developerId string) ([]string, error) {
 	if err := json.Unmarshal(body, &result); err != nil {
 		return nil, err
 	}
-	app := result["app"].(map[string]any)
-	if app == nil {
+	appRaw, exists := result["app"]
+	if !exists {
 		return nil, fmt.Errorf("app not found")
 	}
+	app, ok := appRaw.(map[string]any)
+	if !ok || app == nil {
+		return nil, fmt.Errorf("failed to parse app info: field app has unexpected type %T", appRaw)
+	}
+
 	var packages []string
-	otherApps := app["other_apps"].(map[string]any)
-	if otherApps != nil {
-		// cut first app because it is the same as the requested app
-		// and we need only other apps
-		apps := otherApps["apps"].([]any)[1:]
-		for _, app := range apps {
-			appJson, err := json.Marshal(app)
-			if err != nil {
-				return nil, err
-			}
-			var appInfo AppNashStore
-			if err := json.Unmarshal(appJson, &appInfo); err != nil {
-				return nil, err
-			}
-			packages = append(packages, appInfo.PackageName)
+	otherAppsRaw, exists := app["other_apps"]
+	if !exists || otherAppsRaw == nil {
+		return packages, nil
+	}
+	otherApps, ok := otherAppsRaw.(map[string]any)
+	if !ok {
+		return nil, fmt.Errorf("failed to parse app info: field other_apps has unexpected type %T", otherAppsRaw)
+	}
+	appsRaw, exists := otherApps["apps"]
+	if !exists || appsRaw == nil {
+		return packages, nil
+	}
+	apps, ok := appsRaw.([]any)
+	if !ok {
+		return nil, fmt.Errorf("failed to parse app info: field other_apps.apps has unexpected type %T", appsRaw)
+	}
+	if len(apps) <= 1 {
+		return packages, nil
+	}
+
+	// Cut first app because it is the same as the requested app and we need only other apps.
+	for _, appEntry := range apps[1:] {
+		appInfoMap, ok := appEntry.(map[string]any)
+		if !ok {
+			return nil, fmt.Errorf("failed to parse app info: unexpected app entry type %T", appEntry)
 		}
+		packageRaw, exists := appInfoMap["app_id"]
+		if !exists {
+			return nil, fmt.Errorf("failed to parse app info: field app_id is missing")
+		}
+		packageName, ok := packageRaw.(string)
+		if !ok {
+			return nil, fmt.Errorf("failed to parse app info: field app_id has unexpected type %T", packageRaw)
+		}
+		packages = append(packages, packageName)
 	}
 
 	return packages, nil
