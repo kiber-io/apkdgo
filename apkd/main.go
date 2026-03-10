@@ -56,6 +56,8 @@ var rootCmd = cobra.Command{
 		// Reset mutable global state to keep repeated in-process runs deterministic.
 		packageNamesMap = make(map[string]int)
 		activeSources = nil
+		downloadSuccessCount.Store(0)
+		downloadErrorCount.Store(0)
 		if printVersion {
 			return
 		}
@@ -239,7 +241,6 @@ var rootCmd = cobra.Command{
 			signal.Notify(sigChan, syscall.SIGINT, syscall.SIGTERM)
 			go func() {
 				<-sigChan
-				printSummary()
 				os.Exit(0)
 			}()
 
@@ -252,7 +253,6 @@ var rootCmd = cobra.Command{
 			}
 
 			tq.Wait()
-			printSummary()
 		}
 	},
 }
@@ -264,10 +264,6 @@ func reportError(errText string) {
 
 func reportDownloadSuccess() {
 	downloadSuccessCount.Add(1)
-}
-
-func printSummary() {
-	fmt.Printf("\nSummary: downloaded %d, errors %d\n", downloadSuccessCount.Load(), downloadErrorCount.Load())
 }
 
 type resolvedConfig struct {

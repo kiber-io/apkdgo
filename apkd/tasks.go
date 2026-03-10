@@ -8,6 +8,7 @@ import (
 	"os"
 	"path/filepath"
 	"sync"
+	"sync/atomic"
 
 	"github.com/kiber-io/apkd/apkd/logging"
 	"github.com/kiber-io/apkd/apkd/sources"
@@ -39,6 +40,11 @@ type TaskQueue struct {
 	wg                  sync.WaitGroup
 	maxWorkers          int
 	progress            *mpb.Progress
+	statusBar           *mpb.Bar
+	enqueuedTasks       atomic.Int64
+	runningTasks        atomic.Int64
+	completedTasks      atomic.Int64
+	activeDownloadTasks atomic.Int64
 	stateMu             sync.RWMutex
 	processedPackages   map[string]struct{}
 	processedDevelopers map[string]map[string]struct{}
@@ -53,6 +59,13 @@ func NewTaskQueue(maxWorkers int) *TaskQueue {
 		processedPackages:   make(map[string]struct{}),
 		processedDevelopers: make(map[string]map[string]struct{}),
 	}
+	tq.statusBar = tq.progress.New(0, mpb.NopStyle(),
+		mpb.BarFillerTrim(),
+		mpb.PrependDecorators(decor.Any(func(decor.Statistics) string {
+			return tq.progressStatusLine()
+		})),
+	)
+	tq.statusBar.SetPriority(1_000_000 + tq.statusBar.ID())
 	log.SetOutput(tq.progress)
 
 	for range tq.maxWorkers {
@@ -69,6 +82,7 @@ func (tq *TaskQueue) AddTask(task Task) {
 		logger.Logd(fmt.Sprintf("Adding task: %s", verTask.Version.PackageName))
 	}
 	tq.wg.Add(1)
+	tq.enqueuedTasks.Add(1)
 	select {
 	case tq.queue <- task:
 	default:
@@ -81,6 +95,9 @@ func (tq *TaskQueue) AddTask(task Task) {
 
 func (tq *TaskQueue) Wait() {
 	tq.wg.Wait()
+	if tq.statusBar != nil {
+		tq.statusBar.SetTotal(1, true)
+	}
 	tq.progress.Wait()
 	close(tq.queue)
 }
@@ -118,6 +135,7 @@ func (tq *TaskQueue) reserveDeveloperSource(developerID, sourceName string) bool
 
 func (tq *TaskQueue) worker() {
 	for task := range tq.queue {
+		tq.runningTasks.Add(1)
 		switch t := task.(type) {
 		case PackageTask:
 			tq.markPackageProcessed(t.PackageName)
@@ -128,8 +146,24 @@ func (tq *TaskQueue) worker() {
 		default:
 			reportError(fmt.Sprintf("Unknown task type: %T", t))
 		}
+		tq.runningTasks.Add(-1)
+		tq.completedTasks.Add(1)
 		tq.wg.Done()
 	}
+}
+
+func (tq *TaskQueue) progressStatusLine() string {
+	queued := tq.enqueuedTasks.Load() - tq.runningTasks.Load() - tq.completedTasks.Load()
+	if queued < 0 {
+		queued = 0
+	}
+	return fmt.Sprintf(
+		"Progress: downloaded %d | in progress %d | queued %d | errors %d",
+		downloadSuccessCount.Load(),
+		tq.activeDownloadTasks.Load(),
+		queued,
+		downloadErrorCount.Load(),
+	)
 }
 
 func getDecoratorsForTask(task Task, status string) []decor.Decorator {
@@ -270,6 +304,8 @@ func (tq *TaskQueue) processVersionTask(task VersionTask) {
 		}
 	}
 	logger.Logi(fmt.Sprintf("Downloading package %s from source %s to file %s", task.Version.PackageName, task.Source.Name(), outFile))
+	tq.activeDownloadTasks.Add(1)
+	defer tq.activeDownloadTasks.Add(-1)
 	reader, err := task.Source.Download(task.Version)
 	if err != nil {
 		reportError(fmt.Sprintf("Error downloading package %s from source %s: %v", task.Version.PackageName, task.Source.Name(), err))
