@@ -303,7 +303,7 @@ func (tq *TaskQueue) processVersionTask(task VersionTask) {
 			return
 		}
 	}
-	logger.Logi(fmt.Sprintf("Downloading package %s from source %s to file %s", task.Version.PackageName, task.Source.Name(), outFile))
+	logger.Logd(fmt.Sprintf("Downloading package %s from source %s to file %s", task.Version.PackageName, task.Source.Name(), outFile))
 	tq.activeDownloadTasks.Add(1)
 	defer tq.activeDownloadTasks.Add(-1)
 	reader, err := task.Source.Download(task.Version)
@@ -371,7 +371,7 @@ func (tq *TaskQueue) processVersionTask(task VersionTask) {
 	// Complete the bar even when source-reported size is inaccurate.
 	bar.SetTotal(-1, true)
 	reportDownloadSuccess()
-	logger.Logi(fmt.Sprintf("Package %s downloaded successfully", task.Version.PackageName))
+	logger.Logd(fmt.Sprintf("Package %s downloaded successfully", task.Version.PackageName))
 }
 
 func (tq *TaskQueue) removeBar(prevBar *mpb.Bar) {
@@ -390,7 +390,7 @@ func (tq *TaskQueue) findVersion(packageName string, versionCode int) (sources.V
 	var latestSource sources.Source
 	var latestVersion sources.Version
 	var sourcesErrors []sources.Error
-	logger.Logi(fmt.Sprintf("Searching for package %s in %d sources", packageName, len(activeSources)))
+	logger.Logd(fmt.Sprintf("Searching for package %s in %d sources", packageName, len(activeSources)))
 	for _, source := range activeSources {
 		wg.Add(1)
 		go func(src sources.Source) {
@@ -413,7 +413,7 @@ func (tq *TaskQueue) findVersion(packageName string, versionCode int) (sources.V
 				return
 			}
 			mu.Lock()
-			logger.Logi(fmt.Sprintf("Found package %s v%s (%v) at source %s", packageName, version.Name, version.Code, src.Name()))
+			logger.Logd(fmt.Sprintf("Found package %s v%s (%v) at source %s", packageName, version.Name, version.Code, src.Name()))
 			if version.Code > latestVersion.Code {
 				latestVersion = version
 				latestSource = src

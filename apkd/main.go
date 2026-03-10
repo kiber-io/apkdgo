@@ -75,7 +75,7 @@ var rootCmd = cobra.Command{
 		}
 		logging.Init(verbosity)
 		if resolvedCfg.path != "" {
-			logging.Logi(fmt.Sprintf("Loaded config: %s", resolvedCfg.path))
+			logging.Logd(fmt.Sprintf("Loaded config: %s", resolvedCfg.path))
 		}
 		for _, overrideLog := range configOverrideLogs {
 			logging.Logd(overrideLog)
