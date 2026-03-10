@@ -20,6 +20,56 @@ type ApkCombo struct {
 	BaseSource
 }
 
+func (s *ApkCombo) fetchDocument(url string) (*goquery.Document, *neturl.URL, error) {
+	req, err := s.NewRequest("GET", url, nil)
+	if err != nil {
+		return nil, nil, err
+	}
+	res, err := s.Http().Do(req)
+	if err != nil {
+		return nil, nil, err
+	}
+	reader, err := unpackResponse(res)
+	if err != nil {
+		_ = res.Body.Close()
+		return nil, nil, err
+	}
+	defer func() {
+		_ = reader.Close()
+		if reader != res.Body {
+			_ = res.Body.Close()
+		}
+	}()
+	if res.StatusCode != http.StatusOK {
+		return nil, nil, fmt.Errorf("error: %s", res.Status)
+	}
+	doc, err := goquery.NewDocumentFromReader(reader)
+	if err != nil {
+		return nil, nil, err
+	}
+	var resolvedURL *neturl.URL
+	if res.Request != nil && res.Request.URL != nil {
+		resolvedURL = new(neturl.URL)
+		*resolvedURL = *res.Request.URL
+	}
+	return doc, resolvedURL, nil
+}
+
+func parseVersionCodeText(rawText string) (int, error) {
+	versionCodeText := strings.TrimSpace(rawText)
+	if strings.HasPrefix(versionCodeText, "(") && strings.HasSuffix(versionCodeText, ")") && len(versionCodeText) >= 2 {
+		versionCodeText = strings.TrimSpace(versionCodeText[1 : len(versionCodeText)-1])
+	}
+	if versionCodeText == "" {
+		return 0, fmt.Errorf("version code is empty")
+	}
+	versionCode, err := strconv.Atoi(versionCodeText)
+	if err != nil {
+		return 0, fmt.Errorf("invalid version code %q: %w", versionCodeText, err)
+	}
+	return versionCode, nil
+}
+
 func (s *ApkCombo) Name() string {
 	return "apkcombo"
 }
@@ -34,25 +84,8 @@ func (s *ApkCombo) Download(version Version) (io.ReadCloser, error) {
 func (s *ApkCombo) FindByPackage(packageName string, versionCode int) (Version, error) {
 	var version Version
 
-	url := "https://apkcombo.com/search?q=" + packageName
-
-	req, err := s.NewRequest("GET", url, nil)
-
-	if err != nil {
-		return version, err
-	}
-
-	res, err := s.Net.Do(req)
-	if err != nil {
-		return version, err
-	}
-	defer res.Body.Close()
-	reader, err := unpackResponse(res)
-	if err != nil {
-		return version, err
-	}
-	defer reader.Close()
-	doc, err := goquery.NewDocumentFromReader(reader)
+	searchURL := "https://apkcombo.com/search?q=" + packageName
+	doc, resolvedSearchURL, err := s.fetchDocument(searchURL)
 	if err != nil {
 		return version, err
 	}
@@ -82,21 +115,7 @@ func (s *ApkCombo) FindByPackage(packageName string, versionCode int) (Version, 
 			return version, &AppNotFoundError{PackageName: packageName}
 		}
 		packageName = lastPart
-		req, err = s.NewRequest("GET", link, nil)
-		if err != nil {
-			return version, err
-		}
-		res, err = s.Net.Do(req)
-		if err != nil {
-			return version, err
-		}
-		defer res.Body.Close()
-		reader, err := unpackResponse(res)
-		if err != nil {
-			return version, err
-		}
-		defer reader.Close()
-		doc, err = goquery.NewDocumentFromReader(reader)
+		doc, resolvedSearchURL, err = s.fetchDocument(link)
 		if err != nil {
 			return version, err
 		}
@@ -108,28 +127,21 @@ func (s *ApkCombo) FindByPackage(packageName string, versionCode int) (Version, 
 	}
 	authorName := strings.TrimSpace(authorBlock.Text())
 
-	url, err = neturl.JoinPath(res.Request.URL.String(), "old-versions")
+	if resolvedSearchURL == nil {
+		return version, fmt.Errorf("failed to resolve search URL")
+	}
+	oldVersionsURL, err := neturl.JoinPath(resolvedSearchURL.String(), "old-versions")
 	if err != nil {
 		return version, err
 	}
-	req, err = s.NewRequest("GET", url, nil)
+	doc, resolvedOldVersionsURL, err := s.fetchDocument(oldVersionsURL)
 	if err != nil {
 		return version, err
+	}
+	if resolvedOldVersionsURL == nil {
+		return version, fmt.Errorf("failed to resolve old versions URL")
 	}
 
-	res, err = s.Net.Do(req)
-	if err != nil {
-		return version, err
-	}
-	reader, err = unpackResponse(res)
-	if err != nil {
-		return version, err
-	}
-	defer reader.Close()
-	doc, err = goquery.NewDocumentFromReader(reader)
-	if err != nil {
-		return version, err
-	}
 	doc.Find(".ver-item").EachWithBreak(func(i int, q *goquery.Selection) bool {
 		link, exists := q.Attr("href")
 		if !exists {
@@ -139,24 +151,15 @@ func (s *ApkCombo) FindByPackage(packageName string, versionCode int) (Version, 
 		if err != nil {
 			return true
 		}
-		link = res.Request.URL.ResolveReference(linkUrl).String()
-		req, err = s.NewRequest("GET", link, nil)
+		link = resolvedOldVersionsURL.ResolveReference(linkUrl).String()
+		versionDoc, resolvedVersionURL, err := s.fetchDocument(link)
 		if err != nil {
 			return true
 		}
-		res, err = s.Net.Do(req)
-		if err != nil {
+		if resolvedVersionURL == nil {
 			return true
 		}
-		reader, err = unpackResponse(res)
-		if err != nil {
-			return true
-		}
-		defer reader.Close()
-		versionDoc, err := goquery.NewDocumentFromReader(reader)
-		if err != nil {
-			return true
-		}
+
 		versionBlocks := versionDoc.Find(".variant")
 		if versionBlocks.Length() == 0 {
 			return true
@@ -166,10 +169,7 @@ func (s *ApkCombo) FindByPackage(packageName string, versionCode int) (Version, 
 		if vercodeBlock.Length() == 0 {
 			return true
 		}
-		versionCodeRemoteText := strings.TrimSpace(vercodeBlock.Text())
-		// remove brackets
-		versionCodeRemoteText = versionCodeRemoteText[1 : len(versionCodeRemoteText)-1]
-		versionCodeRemote, err := strconv.Atoi(versionCodeRemoteText)
+		versionCodeRemote, err := parseVersionCodeText(vercodeBlock.Text())
 		if err != nil {
 			return true
 		}
@@ -194,7 +194,7 @@ func (s *ApkCombo) FindByPackage(packageName string, versionCode int) (Version, 
 		if err != nil {
 			return true
 		}
-		link = res.Request.URL.ResolveReference(linkUrl).String()
+		link = resolvedVersionURL.ResolveReference(linkUrl).String()
 
 		sizeBlock := versionBlock.Find(".description .spec.ltr")
 		if sizeBlock.Length() == 0 {
