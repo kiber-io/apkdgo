@@ -109,7 +109,11 @@ func NewHttpClientForSource(sourceName string, timeout time.Duration, p *RetryPo
 		p = currentRetryPolicy()
 	}
 	proxyURL := resolveProxyURL(sourceName)
-	transport := http.DefaultTransport.(*http.Transport).Clone()
+	baseTransport, ok := http.DefaultTransport.(*http.Transport)
+	if !ok {
+		baseTransport = &http.Transport{}
+	}
+	transport := baseTransport.Clone()
 	if proxyURL != nil {
 		transport.Proxy = http.ProxyURL(proxyURL)
 		if isProxyInsecureSkipVerifyEnabled() {
@@ -132,22 +136,27 @@ func NewHttpClientForSource(sourceName string, timeout time.Duration, p *RetryPo
 }
 
 func ConfigureProxies(globalProxy string, sourceProxies map[string]string, insecureSkipVerify bool) error {
-	parsedGlobalProxy, err := parseProxyURL(globalProxy)
-	if err != nil {
-		return fmt.Errorf("invalid global proxy: %w", err)
+	var parsedGlobalProxy *url.URL
+	if trimmedGlobal := strings.TrimSpace(globalProxy); trimmedGlobal != "" {
+		var err error
+		parsedGlobalProxy, err = parseProxyURL(trimmedGlobal)
+		if err != nil {
+			return fmt.Errorf("invalid global proxy: %w", err)
+		}
 	}
 	parsedSourceProxies := make(map[string]*url.URL, len(sourceProxies))
 	for sourceName, rawProxyURL := range sourceProxies {
 		normalizedSourceName := strings.ToLower(strings.TrimSpace(sourceName))
 		if normalizedSourceName == "" {
-			return fmt.Errorf("source name cannot be empty in source proxy map")
+			return errors.New("source name cannot be empty in source proxy map")
 		}
-		parsedSourceProxy, err := parseProxyURL(rawProxyURL)
+		trimmedProxyURL := strings.TrimSpace(rawProxyURL)
+		if trimmedProxyURL == "" {
+			continue
+		}
+		parsedSourceProxy, err := parseProxyURL(trimmedProxyURL)
 		if err != nil {
 			return fmt.Errorf("invalid proxy for source %s: %w", normalizedSourceName, err)
-		}
-		if parsedSourceProxy == nil {
-			continue
 		}
 		parsedSourceProxies[normalizedSourceName] = parsedSourceProxy
 	}
@@ -177,17 +186,17 @@ func ResetClientDefaults() {
 
 func ConfigureClientDefaults(timeout *time.Duration, retryPolicy *RetryPolice) error {
 	if timeout != nil && *timeout <= 0 {
-		return fmt.Errorf("timeout must be > 0")
+		return errors.New("timeout must be > 0")
 	}
 	if retryPolicy != nil {
 		if retryPolicy.MaxAttempts <= 0 {
-			return fmt.Errorf("retry max attempts must be > 0")
+			return errors.New("retry max attempts must be > 0")
 		}
 		if retryPolicy.Delay < 0 {
-			return fmt.Errorf("retry delay must be >= 0")
+			return errors.New("retry delay must be >= 0")
 		}
 		if retryPolicy.MaxDelay < 0 {
-			return fmt.Errorf("retry max delay must be >= 0")
+			return errors.New("retry max delay must be >= 0")
 		}
 		for _, retryStatusCode := range retryPolicy.RetryStatus {
 			if retryStatusCode < 100 || retryStatusCode > 599 {
@@ -212,7 +221,7 @@ func ConfigureSourceHeaderOverrides(sourceHeaders map[string]map[string]string) 
 	for sourceName, headers := range sourceHeaders {
 		normalizedSourceName := strings.ToLower(strings.TrimSpace(sourceName))
 		if normalizedSourceName == "" {
-			return fmt.Errorf("source name cannot be empty in source header map")
+			return errors.New("source name cannot be empty in source header map")
 		}
 		normalizedHeaders := make(http.Header, len(headers))
 		for headerName, headerValue := range headers {
@@ -266,16 +275,12 @@ func currentRetryPolicy() *RetryPolice {
 }
 
 func parseProxyURL(rawProxyURL string) (*url.URL, error) {
-	normalizedProxyURL := strings.TrimSpace(rawProxyURL)
-	if normalizedProxyURL == "" {
-		return nil, nil
-	}
-	proxyURL, err := url.Parse(normalizedProxyURL)
+	proxyURL, err := url.Parse(rawProxyURL)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("failed to parse proxy URL: %w", err)
 	}
 	if proxyURL.Scheme == "" || proxyURL.Host == "" {
-		return nil, fmt.Errorf("proxy URL must include scheme and host")
+		return nil, errors.New("proxy URL must include scheme and host")
 	}
 	return proxyURL, nil
 }
@@ -390,7 +395,7 @@ func (c *Client) Do(req *http.Request) (*http.Response, error) {
 		}
 		if !shouldRetry(resp, err, attempt) {
 			if err != nil {
-				return nil, err
+				return nil, fmt.Errorf("request failed: %w", err)
 			}
 			return resp, nil
 		}
@@ -401,6 +406,8 @@ func (c *Client) Do(req *http.Request) (*http.Response, error) {
 		}
 		if err != nil {
 			lastErr = err
+		} else if resp != nil {
+			lastErr = fmt.Errorf("request failed: status %d", resp.StatusCode)
 		}
 		reason := "unknown reason"
 		if err != nil {
@@ -411,20 +418,22 @@ func (c *Client) Do(req *http.Request) (*http.Response, error) {
 
 		delay := backoffWithJitter(c.retry.Delay, c.retry.MaxDelay, attempt)
 		activeLogger.Logw(fmt.Sprintf("%s Attempt %d/%d failed with %s, retrying in %v...", logContext, attempt, c.retry.MaxAttempts, reason, delay))
+		timer := time.NewTimer(delay)
 		select {
-		case <-time.After(delay):
+		case <-timer.C:
 		case <-req.Context().Done():
-			return nil, req.Context().Err()
+			timer.Stop()
+			return nil, fmt.Errorf("request context done: %w", req.Context().Err())
 		}
 	}
 
 	return nil, lastErr
 }
 
-func (c *Client) Post(url string, body io.Reader) (*http.Response, error) {
-	req, err := http.NewRequest(http.MethodPost, url, body)
+func (c *Client) Post(rawURL string, body io.Reader) (*http.Response, error) {
+	req, err := http.NewRequestWithContext(context.Background(), http.MethodPost, rawURL, body)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("failed to create POST request: %w", err)
 	}
 	return c.Do(req)
 }
@@ -502,7 +511,7 @@ func requestLogContext(reqID uint64, module string) string {
 	return fmt.Sprintf("req-id=%d module=%s", reqID, module)
 }
 
-func backoffWithJitter(baseDelay, maxDelay int, attempt int) time.Duration {
+func backoffWithJitter(baseDelay, maxDelay, attempt int) time.Duration {
 	if attempt < 1 {
 		attempt = 1
 	}
@@ -518,13 +527,15 @@ func backoffWithJitter(baseDelay, maxDelay int, attempt int) time.Duration {
 
 func ReadAndRestoreBody(resp *http.Response) ([]byte, error) {
 	if resp == nil || resp.Body == nil {
-		return nil, fmt.Errorf("response or response body is nil")
+		return nil, errors.New("response or response body is nil")
 	}
 	body, err := io.ReadAll(resp.Body)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("failed to read response body: %w", err)
 	}
-	resp.Body.Close()
+	if err := resp.Body.Close(); err != nil {
+		return nil, fmt.Errorf("failed to close response body: %w", err)
+	}
 	resp.Body = io.NopCloser(bytes.NewBuffer(body))
 	return body, nil
 }

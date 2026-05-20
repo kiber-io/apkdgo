@@ -76,10 +76,11 @@ func NewTaskQueue(maxWorkers int) *TaskQueue {
 }
 
 func (tq *TaskQueue) AddTask(task Task) {
-	if pkgTask, ok := task.(PackageTask); ok {
-		logger.Logd(fmt.Sprintf("Adding task: %s", pkgTask.PackageName))
-	} else if verTask, ok := task.(VersionTask); ok {
-		logger.Logd(fmt.Sprintf("Adding task: %s", verTask.Version.PackageName))
+	switch t := task.(type) {
+	case PackageTask:
+		logger.Logd("Adding task: " + t.PackageName)
+	case VersionTask:
+		logger.Logd("Adding task: " + t.Version.PackageName)
 	}
 	tq.wg.Add(1)
 	tq.enqueuedTasks.Add(1)
@@ -172,18 +173,19 @@ func getDecoratorsForTask(task Task, status string) []decor.Decorator {
 
 	switch t := task.(type) {
 	case PackageTask:
-		decorators = append(decorators, decor.Name(t.PackageName, wc))
-		decorators = append(decorators, decor.Name("-", wc))
+		decorators = append(decorators, decor.Name(t.PackageName, wc), decor.Name("-", wc))
 		if t.VersionCode != 0 {
 			decorators = append(decorators, decor.Name(fmt.Sprintf("(%d)", t.VersionCode), wc))
 		} else {
 			decorators = append(decorators, decor.Name("-", wc))
 		}
 	case VersionTask:
-		decorators = append(decorators, decor.Name(t.Version.PackageName, wc))
-		decorators = append(decorators, decor.Name(fmt.Sprintf("v%s", t.Version.Name), wc))
-		decorators = append(decorators, decor.Name(fmt.Sprintf("(%d)", t.Version.Code), wc))
-		decorators = append(decorators, decor.Name(t.Source.Name(), wc))
+		decorators = append(decorators,
+			decor.Name(t.Version.PackageName, wc),
+			decor.Name("v"+t.Version.Name, wc),
+			decor.Name(fmt.Sprintf("(%d)", t.Version.Code), wc),
+			decor.Name(t.Source.Name(), wc),
+		)
 	}
 	if status != "" {
 		decorators = append(decorators, decor.Name("["+status+"]", wc))
@@ -257,7 +259,11 @@ func (tq *TaskQueue) processPackageTask(task PackageTask) {
 }
 
 func (tq *TaskQueue) processVersionTask(task VersionTask) {
-	bar := tq.progress.AddBar(int64(task.Version.Size),
+	barSize := int64(task.Version.Size) //nolint:gosec // G115: APK sizes never approach int64 max
+	if barSize < 0 {
+		barSize = 0
+	}
+	bar := tq.progress.AddBar(barSize,
 		mpb.BarQueueAfter(task.Bar),
 		mpb.BarRemoveOnComplete(),
 		mpb.PrependDecorators(getDecoratorsForTask(task, "")...),
@@ -280,7 +286,7 @@ func (tq *TaskQueue) processVersionTask(task VersionTask) {
 		outFile = outputFileName
 	} else {
 		if task.Version.Type == "" {
-			reportError(fmt.Sprintf("File type not found for package %s", task.Version.PackageName))
+			reportError("File type not found for package " + task.Version.PackageName)
 			tq.removeBar(bar)
 			return
 		}

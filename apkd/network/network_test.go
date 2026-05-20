@@ -50,7 +50,7 @@ func (b *trackingReadCloser) Close() error {
 
 func TestDefaultRetryDecider(t *testing.T) {
 	decider := defaultRetryDecider([]int{http.StatusTooManyRequests})
-	req, err := http.NewRequest(http.MethodGet, "https://example.com", nil)
+	req, err := http.NewRequestWithContext(context.Background(), http.MethodGet, "https://example.com", http.NoBody)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -85,7 +85,7 @@ func TestDefaultRetryDecider(t *testing.T) {
 }
 
 func TestWithRequestRetryIf(t *testing.T) {
-	req, err := http.NewRequest(http.MethodGet, "https://example.com", nil)
+	req, err := http.NewRequestWithContext(context.Background(), http.MethodGet, "https://example.com", http.NoBody)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -108,7 +108,7 @@ func TestWithoutClientTimeout(t *testing.T) {
 		t.Fatalf("expected nil request to stay nil")
 	}
 
-	req, err := http.NewRequest(http.MethodGet, "https://example.com", nil)
+	req, err := http.NewRequestWithContext(context.Background(), http.MethodGet, "https://example.com", http.NoBody)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -145,7 +145,7 @@ func TestDoWithWithoutClientTimeoutDisablesHTTPClientTimeout(t *testing.T) {
 		},
 	}
 
-	req, err := http.NewRequest(http.MethodGet, "https://example.com", nil)
+	req, err := http.NewRequestWithContext(context.Background(), http.MethodGet, "https://example.com", http.NoBody)
 	if err != nil {
 		t.Fatalf("unexpected request error: %v", err)
 	}
@@ -159,7 +159,7 @@ func TestDoWithWithoutClientTimeoutDisablesHTTPClientTimeout(t *testing.T) {
 	}
 
 	sawDeadline = false
-	req, err = http.NewRequest(http.MethodGet, "https://example.com", nil)
+	req, err = http.NewRequestWithContext(context.Background(), http.MethodGet, "https://example.com", http.NoBody)
 	if err != nil {
 		t.Fatalf("unexpected request error: %v", err)
 	}
@@ -211,7 +211,7 @@ func TestDoClosesResponseBodyBeforeRetry(t *testing.T) {
 		},
 	}
 
-	req, err := http.NewRequest(http.MethodGet, "https://example.com", nil)
+	req, err := http.NewRequestWithContext(context.Background(), http.MethodGet, "https://example.com", http.NoBody)
 	if err != nil {
 		t.Fatalf("unexpected request error: %v", err)
 	}
@@ -240,7 +240,7 @@ func TestRequestContextHelpers(t *testing.T) {
 	ctx = WithModule(ctx, "fdroid")
 	reqLogger := logging.Named("req-test")
 	ctx = WithLogger(ctx, reqLogger)
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, "https://example.com", nil)
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, "https://example.com", http.NoBody)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -269,7 +269,7 @@ func TestRequestLogContext(t *testing.T) {
 }
 
 func TestBackoffWithJitter(t *testing.T) {
-	for i := 0; i < 20; i++ {
+	for range 20 {
 		d := backoffWithJitter(100, 150, 3) // expDelay=400 -> capped=150
 		if d < 0 || d > 150*time.Millisecond {
 			t.Fatalf("expected delay in [0,150ms], got %v", d)
@@ -335,7 +335,7 @@ func TestConfigureProxies(t *testing.T) {
 		t.Fatalf("unexpected configure proxies error: %v", err)
 	}
 
-	req, err := http.NewRequest(http.MethodGet, "https://example.com", nil)
+	req, err := http.NewRequestWithContext(context.Background(), http.MethodGet, "https://example.com", http.NoBody)
 	if err != nil {
 		t.Fatalf("unexpected request error: %v", err)
 	}
@@ -507,7 +507,7 @@ func TestConfigureSourceHeaderOverrides(t *testing.T) {
 	if got := headers.Get("User-Agent"); got != "custom-agent" {
 		t.Fatalf("expected overridden User-Agent, got %q", got)
 	}
-	if got := headers.Get("deviceId"); got != "custom-id" {
+	if got := headers.Get("Deviceid"); got != "custom-id" {
 		t.Fatalf("expected configured deviceId, got %q", got)
 	}
 	if got := headers.Get("X-Test"); got != "1" {

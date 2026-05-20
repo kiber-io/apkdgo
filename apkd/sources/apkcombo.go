@@ -1,6 +1,7 @@
 package sources
 
 import (
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -27,7 +28,7 @@ func (s *ApkCombo) fetchDocument(url string) (*goquery.Document, *neturl.URL, er
 	}
 	res, err := s.Http().Do(req)
 	if err != nil {
-		return nil, nil, err
+		return nil, nil, fmt.Errorf("request failed: %w", err)
 	}
 	reader, err := unpackResponse(res)
 	if err != nil {
@@ -45,7 +46,7 @@ func (s *ApkCombo) fetchDocument(url string) (*goquery.Document, *neturl.URL, er
 	}
 	doc, err := goquery.NewDocumentFromReader(reader)
 	if err != nil {
-		return nil, nil, err
+		return nil, nil, fmt.Errorf("failed to parse HTML: %w", err)
 	}
 	var resolvedURL *neturl.URL
 	if res.Request != nil && res.Request.URL != nil {
@@ -61,7 +62,7 @@ func parseVersionCodeText(rawText string) (int, error) {
 		versionCodeText = strings.TrimSpace(versionCodeText[1 : len(versionCodeText)-1])
 	}
 	if versionCodeText == "" {
-		return 0, fmt.Errorf("version code is empty")
+		return 0, errors.New("version code is empty")
 	}
 	versionCode, err := strconv.Atoi(versionCodeText)
 	if err != nil {
@@ -108,7 +109,7 @@ func (s *ApkCombo) FindByPackage(packageName string, versionCode int) (Version, 
 		}
 		link, err = neturl.JoinPath("https://apkcombo.com", link)
 		if err != nil {
-			return version, err
+			return version, fmt.Errorf("failed to join URL path: %w", err)
 		}
 		lastPart := path.Base(link)
 		if !strings.EqualFold(lastPart, packageName) {
@@ -128,18 +129,18 @@ func (s *ApkCombo) FindByPackage(packageName string, versionCode int) (Version, 
 	authorName := strings.TrimSpace(authorBlock.Text())
 
 	if resolvedSearchURL == nil {
-		return version, fmt.Errorf("failed to resolve search URL")
+		return version, errors.New("failed to resolve search URL")
 	}
 	oldVersionsURL, err := neturl.JoinPath(resolvedSearchURL.String(), "old-versions")
 	if err != nil {
-		return version, err
+		return version, fmt.Errorf("failed to join old-versions URL path: %w", err)
 	}
 	doc, resolvedOldVersionsURL, err := s.fetchDocument(oldVersionsURL)
 	if err != nil {
 		return version, err
 	}
 	if resolvedOldVersionsURL == nil {
-		return version, fmt.Errorf("failed to resolve old versions URL")
+		return version, errors.New("failed to resolve old versions URL")
 	}
 
 	doc.Find(".ver-item").EachWithBreak(func(i int, q *goquery.Selection) bool {
@@ -252,7 +253,7 @@ func (s *ApkCombo) FindByDeveloper(developerId string) ([]string, error) {
 	}
 	res, err := s.Net.Do(req)
 	if err != nil {
-		return packages, err
+		return packages, fmt.Errorf("request failed: %w", err)
 	}
 	defer res.Body.Close()
 	reader, err := unpackResponse(res)
@@ -262,18 +263,18 @@ func (s *ApkCombo) FindByDeveloper(developerId string) ([]string, error) {
 	defer reader.Close()
 	doc, err := goquery.NewDocumentFromReader(reader)
 	if err != nil {
-		return packages, err
+		return packages, fmt.Errorf("failed to parse developer page HTML: %w", err)
 	}
 
 	doc.Find(".l_item").EachWithBreak(func(i int, e *goquery.Selection) bool {
 		link, exists := e.Attr("href")
 		if !exists {
-			err = fmt.Errorf("link attribute not found")
+			err = errors.New("link attribute not found")
 			return false
 		}
 		link, err = neturl.JoinPath("https://apkcombo.com", link)
 		if err != nil {
-			err = fmt.Errorf("failed to join path: %v", err)
+			err = fmt.Errorf("failed to join path: %w", err)
 			return false
 		}
 		packageName := path.Base(link)
@@ -292,10 +293,10 @@ func newApkComboSource() (Source, error) {
 	s.Source = s
 	ua, err := fakeUserAgent.New()
 	if err != nil {
-		return nil, fmt.Errorf("failed to create fake user agent: %v", err)
+		return nil, fmt.Errorf("failed to create fake user agent: %w", err)
 	}
 	randomUA := ua.Filter().Platform(fakeUserAgent.Desktop).Browser(fakeUserAgent.Firefox, fakeUserAgent.Chrome).Get()
-	s.Log().Logd(fmt.Sprintf("Using User-Agent: %s", randomUA))
+	s.Log().Logd("Using User-Agent: " + randomUA)
 	headers := network.ApplySourceHeaderOverrides(s.Name(), http.Header{
 		"User-Agent": {randomUA},
 	})

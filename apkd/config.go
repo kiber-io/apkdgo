@@ -106,7 +106,7 @@ type SourceProfileNode struct {
 	Node *yaml.Node
 }
 
-func (n *SourceProfileNode) UnmarshalYAML(value *yaml.Node) error {
+func (n *SourceProfileNode) UnmarshalYAML(value *yaml.Node) error { //nolint:unparam // implements yaml.Unmarshaler
 	n.Node = value
 	return nil
 }
@@ -158,7 +158,7 @@ func loadConfig(path string) (*AppConfig, error) {
 
 	file, err := os.Open(normalizedPath)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("failed to open config file %s: %w", normalizedPath, err)
 	}
 	defer file.Close()
 
@@ -171,14 +171,14 @@ func loadConfig(path string) (*AppConfig, error) {
 			}
 			return cfg, nil
 		}
-		return nil, err
+		return nil, fmt.Errorf("failed to decode config: %w", err)
 	}
 	var extraDoc any
-	if err := decoder.Decode(&extraDoc); err != io.EOF {
+	if err := decoder.Decode(&extraDoc); !errors.Is(err, io.EOF) {
 		if err == nil {
-			return nil, fmt.Errorf("multiple YAML documents are not supported")
+			return nil, errors.New("multiple YAML documents are not supported")
 		}
-		return nil, err
+		return nil, fmt.Errorf("failed to check for multiple YAML documents: %w", err)
 	}
 	if err := normalizeConfig(cfg, configDir); err != nil {
 		return nil, err
@@ -195,13 +195,13 @@ func normalizeConfig(cfg *AppConfig, configDir string) error {
 	}
 
 	if cfg.Defaults.Verbose != nil && *cfg.Defaults.Verbose < 0 {
-		return fmt.Errorf("defaults.verbose must be >= 0")
+		return errors.New("defaults.verbose must be >= 0")
 	}
 	if cfg.Runtime.Workers != nil && *cfg.Runtime.Workers <= 0 {
-		return fmt.Errorf("runtime.workers must be > 0")
+		return errors.New("runtime.workers must be > 0")
 	}
 	if cfg.Network.Timeout != nil && *cfg.Network.Timeout <= 0 {
-		return fmt.Errorf("network.timeout must be > 0")
+		return errors.New("network.timeout must be > 0")
 	}
 
 	if cfg.Defaults.OutputDir != nil {
@@ -211,7 +211,7 @@ func normalizeConfig(cfg *AppConfig, configDir string) error {
 		}
 		outputDir, err := filepath.Abs(outputDir)
 		if err != nil {
-			return fmt.Errorf("error getting absolute path for output directory %s: %v", outputDir, err)
+			return fmt.Errorf("error getting absolute path for output directory %s: %w", outputDir, err)
 		}
 		cfg.Defaults.OutputDir = &outputDir
 	}
@@ -224,7 +224,7 @@ func normalizeConfig(cfg *AppConfig, configDir string) error {
 	for _, sourceName := range cfg.Defaults.Sources {
 		normalizedSourceName := strings.ToLower(strings.TrimSpace(sourceName))
 		if normalizedSourceName == "" {
-			return fmt.Errorf("defaults.sources contains an empty source name")
+			return errors.New("defaults.sources contains an empty source name")
 		}
 		normalizedSelectedSources = append(normalizedSelectedSources, normalizedSourceName)
 	}
@@ -235,7 +235,7 @@ func normalizeConfig(cfg *AppConfig, configDir string) error {
 		normalizedSourceName := strings.ToLower(strings.TrimSpace(sourceName))
 		normalizedProxyURL := strings.TrimSpace(rawProxyURL)
 		if normalizedSourceName == "" {
-			return fmt.Errorf("network.proxy.per_source contains an empty source name")
+			return errors.New("network.proxy.per_source contains an empty source name")
 		}
 		if normalizedProxyURL == "" {
 			return fmt.Errorf("network.proxy.per_source[%s] must be non-empty", normalizedSourceName)
@@ -248,7 +248,7 @@ func normalizeConfig(cfg *AppConfig, configDir string) error {
 	for sourceName, sourceCfg := range cfg.Sources {
 		normalizedSourceName := strings.ToLower(strings.TrimSpace(sourceName))
 		if normalizedSourceName == "" {
-			return fmt.Errorf("sources contains an empty source name")
+			return errors.New("sources contains an empty source name")
 		}
 		normalizedHeaders := make(map[string]string, len(sourceCfg.Headers))
 		for headerName, headerValue := range sourceCfg.Headers {

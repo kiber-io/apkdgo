@@ -3,6 +3,7 @@ package sources
 import (
 	"bytes"
 	"compress/gzip"
+	"context"
 	"errors"
 	"io"
 	"net/http"
@@ -129,7 +130,7 @@ func TestCreateResponseReader(t *testing.T) {
 		}, nil
 	})
 
-	req, err := http.NewRequest(http.MethodGet, "https://example.com", nil)
+	req, err := http.NewRequestWithContext(context.Background(), http.MethodGet, "https://example.com", http.NoBody)
 	if err != nil {
 		t.Fatalf("unexpected request error: %v", err)
 	}
@@ -159,7 +160,7 @@ func TestCreateResponseReaderNon200(t *testing.T) {
 		}, nil
 	})
 
-	req, err := http.NewRequest(http.MethodGet, "https://example.com", nil)
+	req, err := http.NewRequestWithContext(context.Background(), http.MethodGet, "https://example.com", http.NoBody)
 	if err != nil {
 		t.Fatalf("unexpected request error: %v", err)
 	}
@@ -187,7 +188,7 @@ func TestCreateResponseReaderNon200CloseError(t *testing.T) {
 		}, nil
 	})
 
-	req, err := http.NewRequest(http.MethodGet, "https://example.com", nil)
+	req, err := http.NewRequestWithContext(context.Background(), http.MethodGet, "https://example.com", http.NoBody)
 	if err != nil {
 		t.Fatalf("unexpected request error: %v", err)
 	}
