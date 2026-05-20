@@ -3,7 +3,6 @@ package sources
 import (
 	"errors"
 	"fmt"
-	"io"
 	"net/http"
 	neturl "net/url"
 	"path"
@@ -74,7 +73,7 @@ func parseVersionCodeText(rawText string) (int, error) {
 func (s *ApkCombo) Name() string {
 	return "apkcombo"
 }
-func (s *ApkCombo) Download(version Version) (io.ReadCloser, error) {
+func (s *ApkCombo) Download(version Version) (*DownloadStream, error) {
 	req, err := s.NewRequest("GET", version.Link, nil)
 	if err != nil {
 		return nil, err

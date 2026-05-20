@@ -58,7 +58,7 @@ func (s *FDroid) Name() string {
 	return "fdroid"
 }
 
-func (s *FDroid) Download(version Version) (io.ReadCloser, error) {
+func (s *FDroid) Download(version Version) (*DownloadStream, error) {
 	req, err := s.NewRequest("GET", "https://f-droid.org/repo"+version.Link, nil)
 	if err != nil {
 		return nil, err

@@ -36,8 +36,8 @@ func (s stubSource) MaxParallelsDownloads() int                 { return 1 }
 func (s stubSource) Name() string                               { return s.name }
 func (s stubSource) FindByPackage(string, int) (Version, error) { return Version{}, nil }
 func (s stubSource) FindByDeveloper(string) ([]string, error)   { return nil, nil }
-func (s stubSource) Download(Version) (io.ReadCloser, error) {
-	return io.NopCloser(strings.NewReader("")), nil
+func (s stubSource) Download(Version) (*DownloadStream, error) {
+	return &DownloadStream{Body: io.NopCloser(strings.NewReader("")), Size: -1}, nil
 }
 
 func TestRegisterValidatesNameAndDuplicates(t *testing.T) {
@@ -122,11 +122,12 @@ func TestReadBody(t *testing.T) {
 func TestCreateResponseReader(t *testing.T) {
 	doer := doerFunc(func(req *http.Request) (*http.Response, error) {
 		return &http.Response{
-			StatusCode: http.StatusOK,
-			Status:     "200 OK",
-			Header:     http.Header{},
-			Body:       io.NopCloser(strings.NewReader("ok")),
-			Request:    req,
+			StatusCode:    http.StatusOK,
+			Status:        "200 OK",
+			Header:        http.Header{},
+			Body:          io.NopCloser(strings.NewReader("ok")),
+			ContentLength: -1,
+			Request:       req,
 		}, nil
 	})
 
@@ -134,17 +135,47 @@ func TestCreateResponseReader(t *testing.T) {
 	if err != nil {
 		t.Fatalf("unexpected request error: %v", err)
 	}
-	reader, err := createResponseReader(doer, req)
+	stream, err := createResponseReader(doer, req)
 	if err != nil {
 		t.Fatalf("unexpected createResponseReader error: %v", err)
 	}
-	defer reader.Close()
-	body, err := io.ReadAll(reader)
+	defer stream.Body.Close()
+	body, err := io.ReadAll(stream.Body)
 	if err != nil {
 		t.Fatalf("unexpected read error: %v", err)
 	}
 	if string(body) != "ok" {
 		t.Fatalf("expected %q, got %q", "ok", string(body))
+	}
+	if stream.Size != -1 {
+		t.Fatalf("expected Size -1 for unknown content-length, got %d", stream.Size)
+	}
+}
+
+func TestCreateResponseReaderPropagatesContentLength(t *testing.T) {
+	const wantSize int64 = 42
+	doer := doerFunc(func(req *http.Request) (*http.Response, error) {
+		return &http.Response{
+			StatusCode:    http.StatusOK,
+			Status:        "200 OK",
+			Header:        http.Header{},
+			Body:          io.NopCloser(strings.NewReader("ok")),
+			ContentLength: wantSize,
+			Request:       req,
+		}, nil
+	})
+
+	req, err := http.NewRequestWithContext(context.Background(), http.MethodGet, "https://example.com", http.NoBody)
+	if err != nil {
+		t.Fatalf("unexpected request error: %v", err)
+	}
+	stream, err := createResponseReader(doer, req)
+	if err != nil {
+		t.Fatalf("unexpected createResponseReader error: %v", err)
+	}
+	defer stream.Body.Close()
+	if stream.Size != wantSize {
+		t.Fatalf("expected Size %d, got %d", wantSize, stream.Size)
 	}
 }
 
@@ -152,11 +183,12 @@ func TestCreateResponseReaderNon200(t *testing.T) {
 	body := &trackingReadCloser{Reader: strings.NewReader("")}
 	doer := doerFunc(func(req *http.Request) (*http.Response, error) {
 		return &http.Response{
-			StatusCode: http.StatusBadGateway,
-			Status:     "502 Bad Gateway",
-			Header:     http.Header{},
-			Body:       body,
-			Request:    req,
+			StatusCode:    http.StatusBadGateway,
+			Status:        "502 Bad Gateway",
+			Header:        http.Header{},
+			Body:          body,
+			ContentLength: -1,
+			Request:       req,
 		}, nil
 	})
 
@@ -180,11 +212,12 @@ func TestCreateResponseReaderNon200CloseError(t *testing.T) {
 	}
 	doer := doerFunc(func(req *http.Request) (*http.Response, error) {
 		return &http.Response{
-			StatusCode: http.StatusBadGateway,
-			Status:     "502 Bad Gateway",
-			Header:     http.Header{},
-			Body:       body,
-			Request:    req,
+			StatusCode:    http.StatusBadGateway,
+			Status:        "502 Bad Gateway",
+			Header:        http.Header{},
+			Body:          body,
+			ContentLength: -1,
+			Request:       req,
 		}, nil
 	})
 

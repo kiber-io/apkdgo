@@ -259,13 +259,8 @@ func (tq *TaskQueue) processPackageTask(task PackageTask) {
 }
 
 func (tq *TaskQueue) processVersionTask(task VersionTask) {
-	barSize := int64(task.Version.Size) //nolint:gosec // G115: APK sizes never approach int64 max
-	if barSize < 0 {
-		barSize = 0
-	}
-	bar := tq.progress.AddBar(barSize,
+	bar := tq.progress.AddBar(0,
 		mpb.BarQueueAfter(task.Bar),
-		mpb.BarRemoveOnComplete(),
 		mpb.PrependDecorators(getDecoratorsForTask(task, "")...),
 		mpb.AppendDecorators(
 			decor.Percentage(decor.WC{W: 5}),
@@ -312,13 +307,24 @@ func (tq *TaskQueue) processVersionTask(task VersionTask) {
 	logger.Logd(fmt.Sprintf("Downloading package %s from source %s to file %s", task.Version.PackageName, task.Source.Name(), outFile))
 	tq.activeDownloadTasks.Add(1)
 	defer tq.activeDownloadTasks.Add(-1)
-	reader, err := task.Source.Download(task.Version)
+	stream, err := task.Source.Download(task.Version)
 	if err != nil {
 		reportError(fmt.Sprintf("Error downloading package %s from source %s: %v", task.Version.PackageName, task.Source.Name(), err))
 		tq.removeBar(bar)
 		return
 	}
-	progressReader := bar.ProxyReader(reader)
+	// Prefer Content-Length from the response (authoritative). Fall back to
+	// source-reported metadata size, which is sometimes inaccurate. Zero means
+	// unknown: the bar tracks bytes without a target percentage.
+	barSize := stream.Size
+	if barSize <= 0 {
+		barSize = int64(task.Version.Size) //nolint:gosec // G115: APK sizes never approach int64 max
+	}
+	if barSize < 0 {
+		barSize = 0
+	}
+	bar.SetTotal(barSize, false)
+	progressReader := bar.ProxyReader(stream.Body)
 	progressReaderClosed := false
 	defer func() {
 		if progressReaderClosed {
@@ -374,8 +380,7 @@ func (tq *TaskQueue) processVersionTask(task VersionTask) {
 		}
 
 	}
-	// Complete the bar even when source-reported size is inaccurate.
-	bar.SetTotal(-1, true)
+	tq.removeBar(bar)
 	reportDownloadSuccess()
 	logger.Logd(fmt.Sprintf("Package %s downloaded successfully", task.Version.PackageName))
 }

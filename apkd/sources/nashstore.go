@@ -5,7 +5,6 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"io"
 	"math/rand"
 	"net/http"
 	"strings"
@@ -183,7 +182,7 @@ func (s *NashStore) FindByPackage(packageName string, versionCode int) (Version,
 	return version, nil
 }
 
-func (s *NashStore) Download(version Version) (io.ReadCloser, error) {
+func (s *NashStore) Download(version Version) (*DownloadStream, error) {
 	req, err := s.NewRequest("GET", version.Link, nil)
 	if err != nil {
 		return nil, err

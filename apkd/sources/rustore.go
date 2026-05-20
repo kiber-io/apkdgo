@@ -49,7 +49,7 @@ func defaultRuStoreProfile() RuStoreProfile {
 	}
 }
 
-func (s *RuStore) Download(version Version) (io.ReadCloser, error) {
+func (s *RuStore) Download(version Version) (*DownloadStream, error) {
 	appInfo, err := s.getAppInfo(version.PackageName)
 	if err != nil {
 		return nil, err

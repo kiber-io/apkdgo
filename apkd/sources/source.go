@@ -17,12 +17,21 @@ import (
 	"github.com/vbauerster/mpb/v8"
 )
 
+// DownloadStream is returned by Source.Download. Body is the response body to
+// read from; Size is the exact byte count that will arrive, taken from the
+// HTTP Content-Length header. Size is -1 when the server did not send a
+// Content-Length (e.g. chunked transfer, transparent gzip decompression).
+type DownloadStream struct {
+	Body io.ReadCloser
+	Size int64
+}
+
 type Source interface {
 	MaxParallelsDownloads() int
 	Name() string
 	FindByPackage(packageName string, versionCode int) (Version, error)
 	FindByDeveloper(developerId string) ([]string, error)
-	Download(version Version) (io.ReadCloser, error)
+	Download(version Version) (*DownloadStream, error)
 }
 
 type BaseSource struct {
@@ -191,7 +200,7 @@ func unpackResponse(res *http.Response) (io.ReadCloser, error) {
 	}
 }
 
-func createResponseReader(httpClient network.Doer, req *http.Request) (io.ReadCloser, error) {
+func createResponseReader(httpClient network.Doer, req *http.Request) (*DownloadStream, error) {
 	if httpClient == nil {
 		httpClient = network.DefaultClient()
 	}
@@ -208,7 +217,7 @@ func createResponseReader(httpClient network.Doer, req *http.Request) (io.ReadCl
 		}
 		return nil, fmt.Errorf("error: %s", resp.Status)
 	}
-	return resp.Body, nil
+	return &DownloadStream{Body: resp.Body, Size: resp.ContentLength}, nil
 }
 
 func (s *BaseSource) NewRequest(method, url string, body io.Reader) (*http.Request, error) {
