@@ -49,12 +49,15 @@ func defaultRuStoreProfile() RuStoreProfile {
 	}
 }
 
-func (s *RuStore) Download(version Version) (io.ReadCloser, error) {
+func (s *RuStore) Download(version Version) (*DownloadStream, error) {
 	appInfo, err := s.getAppInfo(version.PackageName)
 	if err != nil {
 		return nil, err
 	}
-	appId := appInfo["appId"].(float64)
+	appId, ok := appInfo["appId"].(float64)
+	if !ok {
+		return nil, errors.New("appId not found or invalid in app info")
+	}
 	downloadLink, err := s.getDownloadLink(appId)
 	if err != nil {
 		return nil, err
@@ -114,9 +117,8 @@ func (s *RuStore) getAppInfo(packageName string) (map[string]any, error) {
 	}
 
 	res, err := s.Http().Do(req)
-
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("failed to fetch app info: %w", err)
 	}
 
 	defer res.Body.Close()
@@ -128,16 +130,19 @@ func (s *RuStore) getAppInfo(packageName string) (map[string]any, error) {
 		if res.StatusCode == http.StatusNotFound {
 			return nil, &AppNotFoundError{PackageName: packageName}
 		}
-		return nil, errors.New("failed to get app info (" + strconv.Itoa(res.StatusCode) + "): " + string(body))
+		return nil, fmt.Errorf("failed to get app info (%d): %s", res.StatusCode, body)
 	}
 
 	var result map[string]any
 	if err := json.Unmarshal(body, &result); err != nil {
-		return nil, err
+		return nil, fmt.Errorf("failed to parse app info: %w", err)
 	}
 
 	if result["code"] == "OK" {
-		appInfo := result["body"].(map[string]any)
+		appInfo, ok := result["body"].(map[string]any)
+		if !ok {
+			return nil, errors.New("body not found or invalid in app info response")
+		}
 		s.appsCacheMu.Lock()
 		if s.appsCache == nil {
 			s.appsCache = make(map[string]map[string]any)
@@ -168,7 +173,7 @@ func (s *RuStore) getDownloadLink(appId float64) (string, error) {
 	}
 	payloadBytes, err := json.Marshal(payloadData)
 	if err != nil {
-		return "", err
+		return "", fmt.Errorf("failed to marshal download link request: %w", err)
 	}
 	payload := bytes.NewReader(payloadBytes)
 	req, err := s.NewRequest("POST", url, payload)
@@ -177,9 +182,8 @@ func (s *RuStore) getDownloadLink(appId float64) (string, error) {
 	}
 
 	resp, err := s.Http().Do(req)
-
 	if err != nil {
-		return "", err
+		return "", fmt.Errorf("failed to fetch download link: %w", err)
 	}
 
 	defer resp.Body.Close()
@@ -191,24 +195,43 @@ func (s *RuStore) getDownloadLink(appId float64) (string, error) {
 		if resp.StatusCode == http.StatusNotFound {
 			return "", &AppNotFoundError{PackageName: strconv.Itoa(int(appId))}
 		}
-		return "", errors.New("failed to get download link (" + strconv.Itoa(resp.StatusCode) + "): " + string(body))
+		return "", fmt.Errorf("failed to get download link (%d): %s", resp.StatusCode, body)
 	}
 	var result map[string]any
 	if err := json.Unmarshal(body, &result); err != nil {
-		return "", err
+		return "", fmt.Errorf("failed to parse download link response: %w", err)
 	}
 	if _, ok := result["error"]; ok {
-		return "", errors.New(result["error"].(string))
+		errMsg, ok := result["error"].(string)
+		if !ok {
+			return "", errors.New("error field is not a string in download link response")
+		}
+		return "", errors.New(errMsg)
 	}
 	if result["code"] != "OK" {
-		return "", errors.New(result["message"].(string))
+		msg, ok := result["message"].(string)
+		if !ok {
+			return "", errors.New("message field is not a string in download link response")
+		}
+		return "", errors.New(msg)
 	}
-	downloadUrls := result["body"].(map[string]any)["downloadUrls"].([]any)
-	if len(downloadUrls) == 0 {
-		return "", errors.New("no download URLs found in response")
+	bodyMap, ok := result["body"].(map[string]any)
+	if !ok {
+		return "", errors.New("body not found or invalid in download link response")
 	}
-	downloadUrl := downloadUrls[0].(map[string]any)
-	return downloadUrl["url"].(string), nil
+	downloadUrls, ok := bodyMap["downloadUrls"].([]any)
+	if !ok || len(downloadUrls) == 0 {
+		return "", errors.New("downloadUrls not found or empty in download link response")
+	}
+	downloadUrlEntry, ok := downloadUrls[0].(map[string]any)
+	if !ok {
+		return "", errors.New("first downloadUrl entry is not a map in download link response")
+	}
+	urlStr, ok := downloadUrlEntry["url"].(string)
+	if !ok {
+		return "", errors.New("url field not found or invalid in download link response")
+	}
+	return urlStr, nil
 }
 
 func (s *RuStore) FindByPackage(packageName string, versionCode int) (Version, error) {
@@ -216,13 +239,25 @@ func (s *RuStore) FindByPackage(packageName string, versionCode int) (Version, e
 	if err != nil {
 		return Version{}, err
 	}
-	size := appInfo["fileSize"].(float64)
-	versionName := appInfo["versionName"].(string)
-	versionCodeApi := appInfo["versionCode"].(float64)
+	size, ok := appInfo["fileSize"].(float64)
+	if !ok {
+		return Version{}, errors.New("fileSize not found or invalid in app info")
+	}
+	versionName, ok := appInfo["versionName"].(string)
+	if !ok {
+		return Version{}, errors.New("versionName not found or invalid in app info")
+	}
+	versionCodeApi, ok := appInfo["versionCode"].(float64)
+	if !ok {
+		return Version{}, errors.New("versionCode not found or invalid in app info")
+	}
 	if versionCode != 0 && versionCode != int(versionCodeApi) {
 		return Version{}, &AppNotFoundError{PackageName: packageName}
 	}
-	developerId := appInfo["publicCompanyId"].(string)
+	developerId, ok := appInfo["publicCompanyId"].(string)
+	if !ok {
+		return Version{}, errors.New("publicCompanyId not found or invalid in app info")
+	}
 	version := Version{
 		Name:        versionName,
 		Code:        int(versionCodeApi),
@@ -245,9 +280,8 @@ func (s *RuStore) FindByDeveloper(developerId string) ([]string, error) {
 		return nil, err
 	}
 	res, err := s.Http().Do(req)
-
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("failed to fetch developer apps: %w", err)
 	}
 
 	defer res.Body.Close()
@@ -259,23 +293,42 @@ func (s *RuStore) FindByDeveloper(developerId string) ([]string, error) {
 		if res.StatusCode == http.StatusNotFound {
 			return nil, &AppNotFoundError{PackageName: developerId}
 		}
-		return nil, errors.New("failed to get developer apps (" + strconv.Itoa(res.StatusCode) + "): " + string(body))
+		return nil, fmt.Errorf("failed to get developer apps (%d): %s", res.StatusCode, body)
 	}
 	var result map[string]any
 	if err := json.Unmarshal(body, &result); err != nil {
-		return nil, err
+		return nil, fmt.Errorf("failed to parse developer apps response: %w", err)
 	}
 	if result["code"] != "OK" {
-		return nil, errors.New(result["message"].(string))
+		msg, ok := result["message"].(string)
+		if !ok {
+			return nil, errors.New("message field is not a string in developer apps response")
+		}
+		return nil, errors.New(msg)
+	}
+	devBodyMap, ok := result["body"].(map[string]any)
+	if !ok {
+		return nil, errors.New("body not found or invalid in developer apps response")
+	}
+	elements, ok := devBodyMap["elements"].([]any)
+	if !ok {
+		return nil, errors.New("elements not found or invalid in developer apps response")
 	}
 	var packages []string
-	for _, app := range result["body"].(map[string]any)["elements"].([]any) {
-		appInfo := app.(map[string]any)
+	for _, app := range elements {
+		appInfo, ok := app.(map[string]any)
+		if !ok {
+			return nil, errors.New("app info is not a map in developer apps response")
+		}
 		packageName, exist := appInfo["packageName"]
 		if !exist {
 			return nil, errors.New("packageName not found in app info")
 		}
-		packages = append(packages, packageName.(string))
+		pkgName, ok := packageName.(string)
+		if !ok {
+			return nil, errors.New("packageName is not a string in app info")
+		}
+		packages = append(packages, pkgName)
 	}
 	return packages, nil
 }
@@ -299,7 +352,9 @@ func replaceFileSafely(srcFile, dstFile string) error {
 
 	if err := os.Rename(srcFile, dstFile); err != nil {
 		if backupCreated {
-			_ = os.Rename(backupFile, dstFile)
+			if restoreErr := os.Rename(backupFile, dstFile); restoreErr != nil {
+				return fmt.Errorf("failed to replace %s with %s (also failed to restore backup: %w): %w", dstFile, srcFile, restoreErr, err)
+			}
 		}
 		return fmt.Errorf("failed to replace %s with %s: %w", dstFile, srcFile, err)
 	}
@@ -310,10 +365,10 @@ func replaceFileSafely(srcFile, dstFile string) error {
 	return nil
 }
 
-func (s *RuStore) ExtractApkFromZip(zipFile string, outFile string) (retErr error) {
+func (s *RuStore) ExtractApkFromZip(zipFile, outFile string) (retErr error) {
 	r, err := zip.OpenReader(zipFile)
 	if err != nil {
-		return err
+		return fmt.Errorf("failed to open zip file %s: %w", zipFile, err)
 	}
 	closeZipReader := func() error {
 		if r == nil {
@@ -338,7 +393,7 @@ func (s *RuStore) ExtractApkFromZip(zipFile string, outFile string) (retErr erro
 	hasManifest := false
 	var apkFile *zip.File
 	for _, f := range r.File {
-		s.Log().Logd(fmt.Sprintf("Checking file in zip: %s", f.Name))
+		s.Log().Logd("Checking file in zip: " + f.Name)
 		if f.FileInfo().IsDir() {
 			continue
 		}
@@ -368,10 +423,10 @@ func (s *RuStore) ExtractApkFromZip(zipFile string, outFile string) (retErr erro
 		return fmt.Errorf("no .apk file found in archive %s", zipFile)
 	}
 
-	s.Log().Logd(fmt.Sprintf("Extracting .apk from zip file: %s", zipFile))
+	s.Log().Logd("Extracting .apk from zip file: " + zipFile)
 	tmpFile, err := os.CreateTemp(filepath.Dir(outFile), filepath.Base(outFile)+".tmp-*")
 	if err != nil {
-		return err
+		return fmt.Errorf("failed to create temporary file: %w", err)
 	}
 	tmpPath := tmpFile.Name()
 	closeTmpFile := func() error {
@@ -404,10 +459,11 @@ func (s *RuStore) ExtractApkFromZip(zipFile string, outFile string) (retErr erro
 	}
 	rc, err = apkFile.Open()
 	if err != nil {
+		wrappedErr := fmt.Errorf("failed to open APK file in archive: %w", err)
 		if closeErr := closeTmpFile(); closeErr != nil {
-			return errors.Join(err, closeErr)
+			return errors.Join(wrappedErr, closeErr)
 		}
-		return err
+		return wrappedErr
 	}
 	defer func() {
 		if closeErr := closeArchiveReader(); closeErr != nil {
@@ -415,11 +471,36 @@ func (s *RuStore) ExtractApkFromZip(zipFile string, outFile string) (retErr erro
 		}
 	}()
 
-	if _, err := io.Copy(tmpFile, rc); err != nil {
+	const maxExtractedAPKSize = 8 * 1024 * 1024 * 1024 // 8 GiB
+	expectedSize := apkFile.UncompressedSize64
+	if expectedSize > maxExtractedAPKSize {
+		return fmt.Errorf(
+			"embedded APK %s is too large: %d bytes exceeds limit %d",
+			apkFile.Name, expectedSize, maxExtractedAPKSize,
+		)
+	}
+
+	limitedReader := io.LimitReader(rc, int64(maxExtractedAPKSize)+1)
+	written, err := io.Copy(tmpFile, limitedReader)
+
+	if err != nil {
+		wrappedErr := fmt.Errorf("failed to extract APK: %w", err)
 		if closeErr := closeTmpFile(); closeErr != nil {
-			return errors.Join(err, closeErr)
+			return errors.Join(wrappedErr, closeErr)
 		}
-		return err
+		return wrappedErr
+	}
+	if written > int64(maxExtractedAPKSize) {
+		return fmt.Errorf(
+			"embedded APK %s exceeds extraction limit %d bytes",
+			apkFile.Name, maxExtractedAPKSize,
+		)
+	}
+	if expectedSize > 0 && uint64(written) != expectedSize {
+		s.Log().Logw(fmt.Sprintf(
+			"Extracted APK size mismatch for %s: wrote %d bytes, expected %d bytes",
+			apkFile.Name, written, expectedSize,
+		))
 	}
 	if err := closeArchiveReader(); err != nil {
 		return err

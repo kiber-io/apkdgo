@@ -1,6 +1,7 @@
 package main
 
 import (
+	"errors"
 	"fmt"
 	"maps"
 	"os"
@@ -43,6 +44,8 @@ var activeSources []sources.Source
 var downloadSuccessCount atomic.Int64
 var downloadErrorCount atomic.Int64
 
+var sanitizeFileNameRe = regexp.MustCompile(`[<>:"/\\|?*]+`)
+
 var (
 	version   = "dev"
 	commit    = "none"
@@ -75,7 +78,7 @@ var rootCmd = cobra.Command{
 		}
 		logging.Init(verbosity)
 		if resolvedCfg.path != "" {
-			logging.Logd(fmt.Sprintf("Loaded config: %s", resolvedCfg.path))
+			logging.Logd("Loaded config: " + resolvedCfg.path)
 		}
 		for _, overrideLog := range configOverrideLogs {
 			logging.Logd(overrideLog)
@@ -180,7 +183,8 @@ var rootCmd = cobra.Command{
 			os.Exit(1)
 		}
 		if outputDir != "" {
-			outputDir, err, warn := sanitizedAndAbsoluteName(outputDir)
+			var err, warn error
+			outputDir, err, warn = sanitizedAndAbsoluteName(outputDir)
 			if err != nil {
 				fmt.Printf("Error getting absolute path for output directory %s: %v\n", outputDir, err)
 				os.Exit(1)
@@ -190,7 +194,7 @@ var rootCmd = cobra.Command{
 			}
 			info, err := os.Stat(outputDir)
 			if os.IsNotExist(err) {
-				err = os.MkdirAll(outputDir, 0755)
+				err = os.MkdirAll(outputDir, 0o750)
 				if err != nil {
 					fmt.Printf("Error creating output directory %s: %v\n", outputDir, err)
 					os.Exit(1)
@@ -208,7 +212,8 @@ var rootCmd = cobra.Command{
 				fmt.Println("Output file name is not supported when downloading multiple packages.")
 				os.Exit(1)
 			}
-			outputFileName, err, warn := sanitizedAndAbsoluteName(outputFileName)
+			var err, warn error
+			outputFileName, err, warn = sanitizedAndAbsoluteName(outputFileName)
 			if err != nil {
 				fmt.Printf("Error getting absolute path for output file %s: %v\n", outputFileName, err)
 				os.Exit(1)
@@ -379,7 +384,7 @@ func applyConfig(cmd *cobra.Command) (*resolvedConfig, []string, error) {
 		resolved.configuredSourceNames[sourceName] = struct{}{}
 		if sourceCfg.Profile != nil && sourceCfg.Profile.Node != nil {
 			profile, err := sources.DecodeSourceProfile(sourceName, sourceCfg.Profile.Node)
-			if err != nil {
+			if err != nil && !errors.Is(err, sources.ErrNoProfile) {
 				return nil, nil, fmt.Errorf("invalid sources.%s.profile: %w", sourceName, err)
 			}
 			if profile != nil {
@@ -412,13 +417,13 @@ func buildRetryPolicy(cfg ConfigRetry) (*network.RetryPolice, error) {
 		retryPolicy.RetryStatus = append([]int(nil), cfg.RetryStatus...)
 	}
 	if retryPolicy.MaxAttempts <= 0 {
-		return nil, fmt.Errorf("max_attempts must be > 0")
+		return nil, errors.New("max_attempts must be > 0")
 	}
 	if retryPolicy.Delay < 0 {
-		return nil, fmt.Errorf("delay_ms must be >= 0")
+		return nil, errors.New("delay_ms must be >= 0")
 	}
 	if retryPolicy.MaxDelay < 0 {
-		return nil, fmt.Errorf("max_delay_ms must be >= 0")
+		return nil, errors.New("max_delay_ms must be >= 0")
 	}
 	for _, retryStatusCode := range retryPolicy.RetryStatus {
 		if retryStatusCode < 100 || retryStatusCode > 599 {
@@ -495,13 +500,13 @@ func validateKnownSources(
 	}
 	parts := make([]string, 0, 3)
 	if len(unknownSelected) > 0 {
-		parts = append(parts, fmt.Sprintf("--source: %s", joinSortedSet(unknownSelected)))
+		parts = append(parts, "--source: "+joinSortedSet(unknownSelected))
 	}
 	if len(unknownSourceProxies) > 0 {
-		parts = append(parts, fmt.Sprintf("--source-proxy: %s", joinSortedSet(unknownSourceProxies)))
+		parts = append(parts, "--source-proxy: "+joinSortedSet(unknownSourceProxies))
 	}
 	if len(unknownConfiguredSources) > 0 {
-		parts = append(parts, fmt.Sprintf("config.sources: %s", joinSortedSet(unknownConfiguredSources)))
+		parts = append(parts, "config.sources: "+joinSortedSet(unknownConfiguredSources))
 	}
 	return fmt.Errorf("unknown source name(s) in %s. Use --list-sources to see available sources", strings.Join(parts, "; "))
 }
@@ -539,8 +544,7 @@ func main() {
 }
 
 func sanitizeFileName(name string) string {
-	reg := regexp.MustCompile(`[<>:"/\\|?*]+`)
-	safe := reg.ReplaceAllString(name, "-")
+	safe := sanitizeFileNameRe.ReplaceAllString(name, "-")
 	safe = strings.TrimSpace(safe)
 	if len(safe) > 255 {
 		safe = safe[:255]
@@ -552,7 +556,7 @@ func sanitizeFileName(name string) string {
 func sanitizedAndAbsoluteName(name string) (string, error, error) {
 	absPath, err := filepath.Abs(name)
 	if err != nil {
-		return "", err, nil
+		return "", fmt.Errorf("failed to get absolute path: %w", err), nil
 	}
 	base := filepath.Base(absPath)
 	sanitizedName := sanitizeFileName(base)

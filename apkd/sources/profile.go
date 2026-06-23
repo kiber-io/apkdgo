@@ -2,6 +2,7 @@ package sources
 
 import (
 	"bytes"
+	"errors"
 	"fmt"
 	"strings"
 	"sync"
@@ -20,10 +21,10 @@ var configuredSourceProfiles = make(map[string]any)
 func RegisterSourceProfileDecoder(sourceName string, decoder ProfileDecoder) error {
 	normalizedSourceName := normalizeSourceName(sourceName)
 	if normalizedSourceName == "" {
-		return fmt.Errorf("source profile decoder name cannot be empty")
+		return errors.New("source profile decoder name cannot be empty")
 	}
 	if decoder == nil {
-		return fmt.Errorf("source profile decoder cannot be nil")
+		return errors.New("source profile decoder cannot be nil")
 	}
 
 	sourceProfileDecodersMu.Lock()
@@ -74,14 +75,17 @@ func RegisterSourceProfileDecoderWithDefaults[T any](
 	return RegisterSourceProfileDecoder(sourceName, buildSourceProfileDecoderWithDefaults(defaultProfile, normalize, validate))
 }
 
+// ErrNoProfile is returned when a source has no profile configured.
+var ErrNoProfile = errors.New("no profile configured")
+
 func DecodeSourceProfile(sourceName string, node *yaml.Node) (any, error) {
 	if node == nil || node.Kind == 0 || node.Tag == "!!null" {
-		return nil, nil
+		return nil, ErrNoProfile
 	}
 
 	normalizedSourceName := normalizeSourceName(sourceName)
 	if normalizedSourceName == "" {
-		return nil, fmt.Errorf("source name cannot be empty")
+		return nil, errors.New("source name cannot be empty")
 	}
 
 	sourceProfileDecodersMu.RLock()
@@ -141,18 +145,21 @@ func normalizeSourceName(sourceName string) string {
 
 func DecodeProfileNodeStrict(node *yaml.Node, out any) error {
 	if node == nil {
-		return fmt.Errorf("profile node cannot be nil")
+		return errors.New("profile node cannot be nil")
 	}
 	var profileYAML bytes.Buffer
 	encoder := yaml.NewEncoder(&profileYAML)
 	if err := encoder.Encode(node); err != nil {
-		return err
+		return fmt.Errorf("failed to encode profile YAML: %w", err)
 	}
 	if err := encoder.Close(); err != nil {
-		return err
+		return fmt.Errorf("failed to close YAML encoder: %w", err)
 	}
 
 	decoder := yaml.NewDecoder(&profileYAML)
 	decoder.KnownFields(true)
-	return decoder.Decode(out)
+	if err := decoder.Decode(out); err != nil {
+		return fmt.Errorf("failed to decode profile: %w", err)
+	}
+	return nil
 }

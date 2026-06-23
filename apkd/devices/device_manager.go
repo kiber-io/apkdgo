@@ -152,7 +152,7 @@ func generateAndroidID() string {
 	if _, err := crand.Read(randomBytes); err != nil {
 		fallback := rand.New(rand.NewSource(time.Now().UnixNano()))
 		for i := range randomBytes {
-			randomBytes[i] = byte(fallback.Intn(256))
+			randomBytes[i] = byte(fallback.Intn(256)) //nolint:gosec // G115: Intn(256) is bounded to [0,255]
 		}
 	}
 	return hex.EncodeToString(randomBytes)

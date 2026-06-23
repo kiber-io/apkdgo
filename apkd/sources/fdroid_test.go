@@ -1,6 +1,7 @@
 package sources
 
 import (
+	"errors"
 	"net/http"
 	"strings"
 	"testing"
@@ -54,7 +55,8 @@ func TestFDroidGetAppInfoNotFound(t *testing.T) {
 	if err == nil {
 		t.Fatalf("expected app-not-found error")
 	}
-	if _, ok := err.(*AppNotFoundError); !ok {
+	var appNotFoundErr *AppNotFoundError
+	if !errors.As(err, &appNotFoundErr) {
 		t.Fatalf("expected AppNotFoundError, got %T", err)
 	}
 }
@@ -129,7 +131,8 @@ func TestFDroidFindNeededVersionNotFound(t *testing.T) {
 	if err == nil {
 		t.Fatalf("expected app-not-found error")
 	}
-	if _, ok := err.(*AppNotFoundError); !ok {
+	var appNotFoundErr *AppNotFoundError
+	if !errors.As(err, &appNotFoundErr) {
 		t.Fatalf("expected AppNotFoundError, got %T", err)
 	}
 }

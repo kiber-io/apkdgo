@@ -1,7 +1,7 @@
 package sources
 
 import (
-	"fmt"
+	"errors"
 	"strings"
 	"testing"
 
@@ -23,7 +23,7 @@ func TestRegisterSourceProfileDecoderWithDefaults(t *testing.T) {
 			},
 			func(profile testProfile) error {
 				if profile.AppVersion == "" {
-					return fmt.Errorf("app_version must be non-empty")
+					return errors.New("app_version must be non-empty")
 				}
 				return nil
 			},

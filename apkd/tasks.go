@@ -76,10 +76,11 @@ func NewTaskQueue(maxWorkers int) *TaskQueue {
 }
 
 func (tq *TaskQueue) AddTask(task Task) {
-	if pkgTask, ok := task.(PackageTask); ok {
-		logger.Logd(fmt.Sprintf("Adding task: %s", pkgTask.PackageName))
-	} else if verTask, ok := task.(VersionTask); ok {
-		logger.Logd(fmt.Sprintf("Adding task: %s", verTask.Version.PackageName))
+	switch t := task.(type) {
+	case PackageTask:
+		logger.Logd("Adding task: " + t.PackageName)
+	case VersionTask:
+		logger.Logd("Adding task: " + t.Version.PackageName)
 	}
 	tq.wg.Add(1)
 	tq.enqueuedTasks.Add(1)
@@ -172,18 +173,19 @@ func getDecoratorsForTask(task Task, status string) []decor.Decorator {
 
 	switch t := task.(type) {
 	case PackageTask:
-		decorators = append(decorators, decor.Name(t.PackageName, wc))
-		decorators = append(decorators, decor.Name("-", wc))
+		decorators = append(decorators, decor.Name(t.PackageName, wc), decor.Name("-", wc))
 		if t.VersionCode != 0 {
 			decorators = append(decorators, decor.Name(fmt.Sprintf("(%d)", t.VersionCode), wc))
 		} else {
 			decorators = append(decorators, decor.Name("-", wc))
 		}
 	case VersionTask:
-		decorators = append(decorators, decor.Name(t.Version.PackageName, wc))
-		decorators = append(decorators, decor.Name(fmt.Sprintf("v%s", t.Version.Name), wc))
-		decorators = append(decorators, decor.Name(fmt.Sprintf("(%d)", t.Version.Code), wc))
-		decorators = append(decorators, decor.Name(t.Source.Name(), wc))
+		decorators = append(decorators,
+			decor.Name(t.Version.PackageName, wc),
+			decor.Name("v"+t.Version.Name, wc),
+			decor.Name(fmt.Sprintf("(%d)", t.Version.Code), wc),
+			decor.Name(t.Source.Name(), wc),
+		)
 	}
 	if status != "" {
 		decorators = append(decorators, decor.Name("["+status+"]", wc))
@@ -257,9 +259,8 @@ func (tq *TaskQueue) processPackageTask(task PackageTask) {
 }
 
 func (tq *TaskQueue) processVersionTask(task VersionTask) {
-	bar := tq.progress.AddBar(int64(task.Version.Size),
+	bar := tq.progress.AddBar(0,
 		mpb.BarQueueAfter(task.Bar),
-		mpb.BarRemoveOnComplete(),
 		mpb.PrependDecorators(getDecoratorsForTask(task, "")...),
 		mpb.AppendDecorators(
 			decor.Percentage(decor.WC{W: 5}),
@@ -280,7 +281,7 @@ func (tq *TaskQueue) processVersionTask(task VersionTask) {
 		outFile = outputFileName
 	} else {
 		if task.Version.Type == "" {
-			reportError(fmt.Sprintf("File type not found for package %s", task.Version.PackageName))
+			reportError("File type not found for package " + task.Version.PackageName)
 			tq.removeBar(bar)
 			return
 		}
@@ -306,13 +307,24 @@ func (tq *TaskQueue) processVersionTask(task VersionTask) {
 	logger.Logd(fmt.Sprintf("Downloading package %s from source %s to file %s", task.Version.PackageName, task.Source.Name(), outFile))
 	tq.activeDownloadTasks.Add(1)
 	defer tq.activeDownloadTasks.Add(-1)
-	reader, err := task.Source.Download(task.Version)
+	stream, err := task.Source.Download(task.Version)
 	if err != nil {
 		reportError(fmt.Sprintf("Error downloading package %s from source %s: %v", task.Version.PackageName, task.Source.Name(), err))
 		tq.removeBar(bar)
 		return
 	}
-	progressReader := bar.ProxyReader(reader)
+	// Prefer Content-Length from the response (authoritative). Fall back to
+	// source-reported metadata size, which is sometimes inaccurate. Zero means
+	// unknown: the bar tracks bytes without a target percentage.
+	barSize := stream.Size
+	if barSize <= 0 {
+		barSize = int64(task.Version.Size) //nolint:gosec // G115: APK sizes never approach int64 max
+	}
+	if barSize < 0 {
+		barSize = 0
+	}
+	bar.SetTotal(barSize, false)
+	progressReader := bar.ProxyReader(stream.Body)
 	progressReaderClosed := false
 	defer func() {
 		if progressReaderClosed {
@@ -367,8 +379,7 @@ func (tq *TaskQueue) processVersionTask(task VersionTask) {
 			return
 		}
 	}
-	// Complete the bar even when source-reported size is inaccurate.
-	bar.SetTotal(-1, true)
+	tq.removeBar(bar)
 	reportDownloadSuccess()
 	logger.Logd(fmt.Sprintf("Package %s downloaded successfully", task.Version.PackageName))
 }

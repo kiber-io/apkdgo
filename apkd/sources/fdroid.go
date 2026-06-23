@@ -2,10 +2,12 @@ package sources
 
 import (
 	"compress/gzip"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
 	"strings"
+	"sync"
 
 	"github.com/goccy/go-json"
 	"github.com/kiber-io/apkd/apkd/network"
@@ -38,8 +40,8 @@ type AppInfo struct {
 
 type FDroid struct {
 	BaseSource
-	appsCache map[string]map[string]any
-	jsonCache map[string]any
+	jsonCacheMu sync.Mutex
+	jsonCache   map[string]any
 }
 
 type FDroidProfile struct {
@@ -56,7 +58,7 @@ func (s *FDroid) Name() string {
 	return "fdroid"
 }
 
-func (s *FDroid) Download(version Version) (io.ReadCloser, error) {
+func (s *FDroid) Download(version Version) (*DownloadStream, error) {
 	req, err := s.NewRequest("GET", "https://f-droid.org/repo"+version.Link, nil)
 	if err != nil {
 		return nil, err
@@ -65,6 +67,8 @@ func (s *FDroid) Download(version Version) (io.ReadCloser, error) {
 }
 
 func (s *FDroid) getJson() (map[string]any, error) {
+	s.jsonCacheMu.Lock()
+	defer s.jsonCacheMu.Unlock()
 	if s.jsonCache != nil {
 		return s.jsonCache, nil
 	}
@@ -77,13 +81,12 @@ func (s *FDroid) getJson() (map[string]any, error) {
 	}
 
 	res, err := s.Http().Do(req)
-
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("failed to fetch fdroid index: %w", err)
 	}
 	defer res.Body.Close()
 
-	var reader io.ReadCloser = res.Body
+	reader := res.Body
 	if res.Header.Get("Content-Encoding") == "gzip" {
 		gzipReader, err := gzip.NewReader(res.Body)
 		if err != nil {
@@ -107,7 +110,7 @@ func (s *FDroid) getJson() (map[string]any, error) {
 	}
 	packages, ok := jsonData["packages"].(map[string]any)
 	if !ok {
-		return nil, fmt.Errorf("invalid JSON format, expected 'packages' object")
+		return nil, errors.New("invalid JSON format, expected 'packages' object")
 	}
 	s.jsonCache = packages
 
@@ -117,17 +120,18 @@ func (s *FDroid) getJson() (map[string]any, error) {
 func (s *FDroid) getAppInfo(data map[string]any, packageName string) (AppInfo, error) {
 	var appInfo AppInfo
 	for pkgName := range data {
-		if strings.EqualFold(pkgName, packageName) {
-			jsonBytes, err := json.Marshal(data[pkgName])
-			if err != nil {
-				return appInfo, fmt.Errorf("error encoding package JSON: %w", err)
-			}
-			if err := json.Unmarshal(jsonBytes, &appInfo); err != nil {
-				return appInfo, fmt.Errorf("error decoding package JSON: %w", err)
-			}
-			appInfo.PackageName = pkgName
-			return appInfo, nil
+		if !strings.EqualFold(pkgName, packageName) {
+			continue
 		}
+		jsonBytes, err := json.Marshal(data[pkgName])
+		if err != nil {
+			return appInfo, fmt.Errorf("error encoding package JSON: %w", err)
+		}
+		if err := json.Unmarshal(jsonBytes, &appInfo); err != nil {
+			return appInfo, fmt.Errorf("error decoding package JSON: %w", err)
+		}
+		appInfo.PackageName = pkgName
+		return appInfo, nil
 	}
 
 	return appInfo, &AppNotFoundError{PackageName: packageName}
@@ -165,19 +169,20 @@ func (s *FDroid) findNeededVersion(appInfo AppInfo, versionCode int) (Version, e
 	if versionCode != 0 {
 		var foundVersion bool
 		for _, remoteVersion := range appInfo.Versions {
-			if remoteVersion.Manifest.VersionCode == versionCode {
-				version.Name = remoteVersion.Manifest.VersionName
-				version.Code = remoteVersion.Manifest.VersionCode
-				version.Size = remoteVersion.File.Size
-				version.Link = remoteVersion.File.Name
-				version.PackageName = appInfo.PackageName
-				version.DeveloperId = appInfo.Metadata.AuthorName
-				foundVersion = true
-				break
+			if remoteVersion.Manifest.VersionCode != versionCode {
+				continue
 			}
+			version.Name = remoteVersion.Manifest.VersionName
+			version.Code = remoteVersion.Manifest.VersionCode
+			version.Size = remoteVersion.File.Size
+			version.Link = remoteVersion.File.Name
+			version.PackageName = appInfo.PackageName
+			version.DeveloperId = appInfo.Metadata.AuthorName
+			foundVersion = true
+			break
 		}
 		if !foundVersion {
-			err = &AppNotFoundError{}
+			err = &AppNotFoundError{PackageName: appInfo.PackageName}
 		}
 	} else {
 		var maxVersionCode int
@@ -187,15 +192,16 @@ func (s *FDroid) findNeededVersion(appInfo AppInfo, versionCode int) (Version, e
 			}
 		}
 		for _, remoteVersion := range appInfo.Versions {
-			if remoteVersion.Manifest.VersionCode == maxVersionCode {
-				version.Name = remoteVersion.Manifest.VersionName
-				version.Code = remoteVersion.Manifest.VersionCode
-				version.Size = remoteVersion.File.Size
-				version.Link = remoteVersion.File.Name
-				version.PackageName = appInfo.PackageName
-				version.DeveloperId = appInfo.Metadata.AuthorName
-				break
+			if remoteVersion.Manifest.VersionCode != maxVersionCode {
+				continue
 			}
+			version.Name = remoteVersion.Manifest.VersionName
+			version.Code = remoteVersion.Manifest.VersionCode
+			version.Size = remoteVersion.File.Size
+			version.Link = remoteVersion.File.Name
+			version.PackageName = appInfo.PackageName
+			version.DeveloperId = appInfo.Metadata.AuthorName
+			break
 		}
 	}
 	return version, err
@@ -234,7 +240,6 @@ func (s *FDroid) FindByDeveloper(developerId string) ([]string, error) {
 
 func newFDroidSource() (Source, error) {
 	s := &FDroid{}
-	s.appsCache = make(map[string]map[string]any)
 	s.Source = s
 	profile, err := ResolveSourceProfile(s.Name(), defaultFDroidProfile())
 	if err != nil {
@@ -257,7 +262,7 @@ func init() {
 			},
 			func(p FDroidProfile) error {
 				if strings.TrimSpace(p.AppVersion) == "" {
-					return fmt.Errorf("appVersion cannot be empty")
+					return errors.New("appVersion cannot be empty")
 				}
 				if !appVersionRegexp.MatchString(p.AppVersion) {
 					return fmt.Errorf("appVersion %q is invalid", p.AppVersion)

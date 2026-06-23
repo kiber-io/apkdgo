@@ -1,0 +1,123 @@
+version: "2"
+
+run:
+  timeout: 5m
+  tests: true
+
+formatters:
+  enable:
+    - gofmt
+    - goimports
+
+linters:
+  default: none
+
+  enable:
+    # Core correctness
+    - errcheck
+    - govet
+    - ineffassign
+    - staticcheck
+    - unused
+
+    # Error handling
+    - errorlint
+    - nilerr
+    - nilnil
+    - wrapcheck
+
+    # Context propagation
+    - contextcheck
+    - noctx
+
+    # Performance / memory
+    - prealloc
+    - perfsprint
+    - makezero
+
+    # Additional correctness
+    - copyloopvar
+    - durationcheck
+    - wastedassign
+    - canonicalheader
+    - exhaustive
+    - intrange
+    - musttag
+    - tparallel
+    - godox
+
+    # Security
+    - gosec
+    - bidichk
+
+    # Quality
+    - revive
+    - nolintlint
+    - misspell
+    - unconvert
+    - unparam
+
+    # Advanced analysis
+    - gocritic
+
+  settings:
+    errcheck:
+      check-type-assertions: true
+      check-blank: true
+
+    govet:
+      disable:
+        - fieldalignment
+
+    revive:
+      confidence: 0.6
+
+      rules:
+        - name: exported
+          disabled: true
+
+        - name: package-comments
+          disabled: true
+
+    gocritic:
+      enabled-tags:
+        - diagnostic
+        - performance
+        - style
+
+      disabled-checks:
+        - hugeParam
+
+    gosec:
+      excludes:
+        - G404  # math/rand weak random: acceptable for temp names / non-crypto use
+        - G304  # file path from variable: expected — config.go and main.go read user-supplied file paths
+
+    exhaustive:
+      default-signifies-exhaustive: true
+
+  exclusions:
+    generated: lax
+    warn-unused: true
+
+    presets:
+      - common-false-positives
+      - std-error-handling
+
+    rules:
+      - path: _test\.go
+        linters:
+          - errcheck
+          - gosec
+          - wrapcheck
+          - nilnil
+          - musttag
+
+      # CLI boundary: errors are printed to the terminal, not propagated for programmatic inspection
+      - path: cmd/
+        linters:
+          - wrapcheck
+
+issues:
+  max-issues-per-linter: 0
+  max-same-issues: 0
