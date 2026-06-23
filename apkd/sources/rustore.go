@@ -471,8 +471,17 @@ func (s *RuStore) ExtractApkFromZip(zipFile, outFile string) (retErr error) {
 		}
 	}()
 
+	const maxExtractedAPKSize = 8 * 1024 * 1024 * 1024 // 8 GiB
 	expectedSize := apkFile.UncompressedSize64
-	written, err := io.Copy(tmpFile, rc)
+	if expectedSize > maxExtractedAPKSize {
+		return fmt.Errorf(
+			"embedded APK %s is too large: %d bytes exceeds limit %d",
+			apkFile.Name, expectedSize, maxExtractedAPKSize,
+		)
+	}
+
+	limitedReader := io.LimitReader(rc, int64(maxExtractedAPKSize)+1)
+	written, err := io.Copy(tmpFile, limitedReader)
 
 	if err != nil {
 		wrappedErr := fmt.Errorf("failed to extract APK: %w", err)
@@ -480,6 +489,12 @@ func (s *RuStore) ExtractApkFromZip(zipFile, outFile string) (retErr error) {
 			return errors.Join(wrappedErr, closeErr)
 		}
 		return wrappedErr
+	}
+	if written > int64(maxExtractedAPKSize) {
+		return fmt.Errorf(
+			"embedded APK %s exceeds extraction limit %d bytes",
+			apkFile.Name, maxExtractedAPKSize,
+		)
 	}
 	if expectedSize > 0 && uint64(written) != expectedSize {
 		s.Log().Logw(fmt.Sprintf(
