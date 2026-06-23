@@ -471,13 +471,21 @@ func (s *RuStore) ExtractApkFromZip(zipFile, outFile string) (retErr error) {
 		}
 	}()
 
-	const maxAPKSize = 2 * 1024 * 1024 * 1024 // 2 GiB
-	if _, err := io.Copy(tmpFile, io.LimitReader(rc, maxAPKSize)); err != nil {
+	expectedSize := apkFile.UncompressedSize64
+	written, err := io.Copy(tmpFile, rc)
+
+	if err != nil {
 		wrappedErr := fmt.Errorf("failed to extract APK: %w", err)
 		if closeErr := closeTmpFile(); closeErr != nil {
 			return errors.Join(wrappedErr, closeErr)
 		}
 		return wrappedErr
+	}
+	if expectedSize > 0 && uint64(written) != expectedSize {
+		s.Log().Logw(fmt.Sprintf(
+			"Extracted APK size mismatch for %s: wrote %d bytes, expected %d bytes",
+			apkFile.Name, written, expectedSize,
+		))
 	}
 	if err := closeArchiveReader(); err != nil {
 		return err
