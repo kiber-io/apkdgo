@@ -7,7 +7,7 @@ This project is a command-line tool for downloading APK files from various sourc
 ## Supported Sources:
 - ApkCombo
 - F-Droid
-- RuStore
+- RuStore (some apps may be unavailable from non-Russian IP addresses and appear as not found)
 - Nashstore (may not work for non-Russian IP addresses)
 - ApkPure (WIP)
 
