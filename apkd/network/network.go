@@ -50,6 +50,7 @@ type retryIfCtxKey struct{}
 type requestModuleCtxKey struct{}
 type requestLoggerCtxKey struct{}
 type withoutClientTimeoutCtxKey struct{}
+type checkRedirectCtxKey struct{}
 
 type RetryDecision uint8
 
@@ -393,6 +394,13 @@ func (c *Client) Do(req *http.Request) (*http.Response, error) {
 			effectiveDoer = &httpClientWithoutTimeout
 		}
 	}
+	if baseHTTPClient, ok := effectiveDoer.(*http.Client); ok {
+		if checkRedirect := checkRedirectFromRequest(req); checkRedirect != nil {
+			httpClientWithCheckRedirect := *baseHTTPClient
+			httpClientWithCheckRedirect.CheckRedirect = checkRedirect
+			effectiveDoer = &httpClientWithCheckRedirect
+		}
+	}
 
 	for attempt := 1; attempt <= c.retry.MaxAttempts; attempt++ {
 		resp, err := effectiveDoer.Do(req)
@@ -459,6 +467,14 @@ func WithoutClientTimeout(req *http.Request) *http.Request {
 	return req.WithContext(ctx)
 }
 
+func WithCheckRedirect(req *http.Request, fn func(req *http.Request, via []*http.Request) error) *http.Request {
+	if req == nil {
+		return nil
+	}
+	ctx := context.WithValue(req.Context(), checkRedirectCtxKey{}, fn)
+	return req.WithContext(ctx)
+}
+
 func WithModule(ctx context.Context, module string) context.Context {
 	return context.WithValue(ctx, requestModuleCtxKey{}, module)
 }
@@ -486,6 +502,18 @@ func withoutClientTimeoutFromRequest(req *http.Request) bool {
 		}
 	}
 	return false
+}
+
+func checkRedirectFromRequest(req *http.Request) func(req *http.Request, via []*http.Request) error {
+	if req == nil {
+		return nil
+	}
+	if val := req.Context().Value(checkRedirectCtxKey{}); val != nil {
+		if checkRedirect, ok := val.(func(req *http.Request, via []*http.Request) error); ok {
+			return checkRedirect
+		}
+	}
+	return nil
 }
 
 func requestModuleFromRequest(req *http.Request) string {
