@@ -3,6 +3,7 @@ package main
 import (
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 
@@ -76,7 +77,7 @@ func newConfigApplyCommand(t *testing.T, args ...string) *cobra.Command {
 func writeTestConfig(t *testing.T, body string) string {
 	t.Helper()
 	path := filepath.Join(t.TempDir(), "config.yaml")
-	if err := os.WriteFile(path, []byte(body), 0644); err != nil {
+	if err := os.WriteFile(path, []byte(body), 0o644); err != nil {
 		t.Fatalf("failed to write config file: %v", err)
 	}
 	return path
@@ -115,7 +116,7 @@ func TestLoadConfigUsesBuiltInDefaultsWhenPathIsEmpty(t *testing.T) {
 
 func TestLoadConfigUsesBuiltInDefaultsWhenFileIsEmpty(t *testing.T) {
 	configPath := filepath.Join(t.TempDir(), "empty.yaml")
-	if err := os.WriteFile(configPath, []byte(""), 0644); err != nil {
+	if err := os.WriteFile(configPath, []byte(""), 0o644); err != nil {
 		t.Fatalf("failed to write empty config file: %v", err)
 	}
 	cfg, err := loadConfig(configPath)
@@ -136,7 +137,7 @@ func TestLoadConfigUsesBuiltInDefaultsWhenFileIsEmpty(t *testing.T) {
 func TestLoadConfigResolvesOutputDirRelativeToConfigPath(t *testing.T) {
 	configDir := t.TempDir()
 	configPath := filepath.Join(configDir, "apkd.yaml")
-	if err := os.WriteFile(configPath, []byte("version: 1\ndefaults:\n  output_dir: ./downloads\n"), 0644); err != nil {
+	if err := os.WriteFile(configPath, []byte("version: 1\ndefaults:\n  output_dir: ./downloads\n"), 0o644); err != nil {
 		t.Fatalf("failed to write config file: %v", err)
 	}
 
@@ -180,14 +181,17 @@ func TestResolveConfigPathExplicit(t *testing.T) {
 }
 
 func TestResolveConfigPathDefault(t *testing.T) {
+	if runtime.GOOS == "darwin" {
+		t.Skip("os.UserConfigDir on macOS ignores XDG_CONFIG_HOME")
+	}
 	configRoot := t.TempDir()
 	t.Setenv("XDG_CONFIG_HOME", configRoot)
 	t.Setenv("APPDATA", configRoot)
 	defaultPath := filepath.Join(configRoot, "apkd", "config.yml")
-	if err := os.MkdirAll(filepath.Dir(defaultPath), 0755); err != nil {
+	if err := os.MkdirAll(filepath.Dir(defaultPath), 0o755); err != nil {
 		t.Fatalf("failed to create default config directory: %v", err)
 	}
-	if err := os.WriteFile(defaultPath, []byte("version: 1\n"), 0644); err != nil {
+	if err := os.WriteFile(defaultPath, []byte("version: 1\n"), 0o644); err != nil {
 		t.Fatalf("failed to write default config file: %v", err)
 	}
 
@@ -215,6 +219,9 @@ func TestResolveConfigPathDefaultMissing(t *testing.T) {
 }
 
 func TestApplyConfigUsesDefaultConfigPath(t *testing.T) {
+	if runtime.GOOS == "darwin" {
+		t.Skip("os.UserConfigDir on macOS ignores XDG_CONFIG_HOME")
+	}
 	state := snapshotMainState()
 	t.Cleanup(func() {
 		restoreMainState(state)
@@ -224,10 +231,10 @@ func TestApplyConfigUsesDefaultConfigPath(t *testing.T) {
 	t.Setenv("XDG_CONFIG_HOME", configRoot)
 	t.Setenv("APPDATA", configRoot)
 	defaultPath := filepath.Join(configRoot, "apkd", "config.yml")
-	if err := os.MkdirAll(filepath.Dir(defaultPath), 0755); err != nil {
+	if err := os.MkdirAll(filepath.Dir(defaultPath), 0o755); err != nil {
 		t.Fatalf("failed to create default config directory: %v", err)
 	}
-	if err := os.WriteFile(defaultPath, []byte("version: 1\ndefaults:\n  force: true\n"), 0644); err != nil {
+	if err := os.WriteFile(defaultPath, []byte("version: 1\ndefaults:\n  force: true\n"), 0o644); err != nil {
 		t.Fatalf("failed to write default config file: %v", err)
 	}
 

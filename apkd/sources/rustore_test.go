@@ -51,7 +51,7 @@ func TestRuStoreGenerateDeviceIDFormat(t *testing.T) {
 		t.Fatalf("expected second part length 10, got %d", len(parts[1]))
 	}
 	for _, c := range parts[0] {
-		if !('a' <= c && c <= 'z') && !('0' <= c && c <= '9') {
+		if !('a' <= c && c <= 'z' || '0' <= c && c <= '9') { //nolint:staticcheck // QF1001: equivalent De Morgan forms
 			t.Fatalf("unexpected char %q in first part", c)
 		}
 	}
@@ -65,7 +65,7 @@ func TestRuStoreGenerateDeviceIDFormat(t *testing.T) {
 func TestReplaceFileSafelySamePath(t *testing.T) {
 	dir := t.TempDir()
 	file := filepath.Join(dir, "file.txt")
-	if err := os.WriteFile(file, []byte("data"), 0644); err != nil {
+	if err := os.WriteFile(file, []byte("data"), 0o644); err != nil {
 		t.Fatalf("failed to write file: %v", err)
 	}
 
@@ -78,10 +78,10 @@ func TestReplaceFileSafelyReplacesDestination(t *testing.T) {
 	dir := t.TempDir()
 	src := filepath.Join(dir, "src.txt")
 	dst := filepath.Join(dir, "dst.txt")
-	if err := os.WriteFile(src, []byte("new"), 0644); err != nil {
+	if err := os.WriteFile(src, []byte("new"), 0o644); err != nil {
 		t.Fatalf("failed to write source file: %v", err)
 	}
-	if err := os.WriteFile(dst, []byte("old"), 0644); err != nil {
+	if err := os.WriteFile(dst, []byte("old"), 0o644); err != nil {
 		t.Fatalf("failed to write destination file: %v", err)
 	}
 

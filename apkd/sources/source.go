@@ -17,12 +17,21 @@ import (
 	"github.com/vbauerster/mpb/v8"
 )
 
+// DownloadStream is returned by Source.Download. Body is the response body to
+// read from; Size is the exact byte count that will arrive, taken from the
+// HTTP Content-Length header. Size is -1 when the server did not send a
+// Content-Length (e.g. chunked transfer, transparent gzip decompression).
+type DownloadStream struct {
+	Body io.ReadCloser
+	Size int64
+}
+
 type Source interface {
 	MaxParallelsDownloads() int
 	Name() string
 	FindByPackage(packageName string, versionCode int) (Version, error)
 	FindByDeveloper(developerId string) ([]string, error)
-	Download(version Version) (io.ReadCloser, error)
+	Download(version Version) (*DownloadStream, error)
 }
 
 type BaseSource struct {
@@ -32,10 +41,13 @@ type BaseSource struct {
 }
 
 type Error struct {
-	error
 	SourceName  string
 	PackageName string
 	Err         error
+}
+
+func (e Error) Error() string {
+	return fmt.Sprintf("source %s: package %s: %v", e.SourceName, e.PackageName, e.Err)
 }
 
 func (s *BaseSource) MaxParallelsDownloads() int {
@@ -49,7 +61,7 @@ func (s *BaseSource) FindByDeveloper(developerId string) ([]string, error) {
 func (s *BaseSource) Log() *logging.Logger {
 	loggerName := "sources"
 	if s.Source != nil {
-		sourceName := strings.ToLower(strings.TrimSpace(s.Source.Name()))
+		sourceName := strings.ToLower(strings.TrimSpace(s.Name()))
 		if sourceName != "" {
 			loggerName = loggerName + "." + sourceName
 		}
@@ -82,7 +94,10 @@ type ProgressReader struct {
 func (pr *ProgressReader) Read(p []byte) (int, error) {
 	n, err := pr.Reader.Read(p)
 	pr.Progress.IncrBy(n)
-	return n, err
+	if err != nil && !errors.Is(err, io.EOF) {
+		return n, fmt.Errorf("read error: %w", err)
+	}
+	return n, err //nolint:wrapcheck // io.EOF must pass through per io.Reader contract
 }
 
 type AppNotFoundError struct {
@@ -90,7 +105,7 @@ type AppNotFoundError struct {
 }
 
 func (e *AppNotFoundError) Error() string {
-	return fmt.Sprintf("%s not found", e.PackageName)
+	return e.PackageName + " not found"
 }
 
 var sources = make(map[string]Source)
@@ -166,7 +181,10 @@ func readBody(res *http.Response) ([]byte, error) {
 	}
 	defer reader.Close()
 	body, err := io.ReadAll(reader)
-	return body, err
+	if err != nil {
+		return nil, fmt.Errorf("failed to read response body: %w", err)
+	}
+	return body, nil
 }
 
 func unpackResponse(res *http.Response) (io.ReadCloser, error) {
@@ -174,7 +192,7 @@ func unpackResponse(res *http.Response) (io.ReadCloser, error) {
 	case "gzip":
 		gzipReader, err := gzip.NewReader(res.Body)
 		if err != nil {
-			return nil, err
+			return nil, fmt.Errorf("failed to create gzip reader: %w", err)
 		}
 		return gzipReader, nil
 	default:
@@ -182,14 +200,14 @@ func unpackResponse(res *http.Response) (io.ReadCloser, error) {
 	}
 }
 
-func createResponseReader(httpClient network.Doer, req *http.Request) (io.ReadCloser, error) {
+func createResponseReader(httpClient network.Doer, req *http.Request) (*DownloadStream, error) {
 	if httpClient == nil {
 		httpClient = network.DefaultClient()
 	}
 	req = network.WithoutClientTimeout(req)
 	resp, err := httpClient.Do(req)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("request failed: %w", err)
 	}
 	if resp.StatusCode != http.StatusOK {
 		if resp.Body != nil {
@@ -199,14 +217,14 @@ func createResponseReader(httpClient network.Doer, req *http.Request) (io.ReadCl
 		}
 		return nil, fmt.Errorf("error: %s", resp.Status)
 	}
-	return resp.Body, nil
+	return &DownloadStream{Body: resp.Body, Size: resp.ContentLength}, nil
 }
 
 func (s *BaseSource) NewRequest(method, url string, body io.Reader) (*http.Request, error) {
-	ctx := network.WithModule(context.Background(), s.Source.Name())
+	ctx := network.WithModule(context.Background(), s.Name())
 	req, err := http.NewRequestWithContext(ctx, method, url, body)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("failed to create request: %w", err)
 	}
 	return req, nil
 }
@@ -215,7 +233,7 @@ func (s *BaseSource) Http() network.Doer {
 	if s.Net == nil {
 		sourceName := ""
 		if s.Source != nil {
-			sourceName = s.Source.Name()
+			sourceName = s.Name()
 		}
 		s.Net = network.DefaultClientForSource(sourceName)
 	}

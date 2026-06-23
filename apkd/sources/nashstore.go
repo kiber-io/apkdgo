@@ -3,8 +3,8 @@ package sources
 import (
 	"bytes"
 	"encoding/json"
+	"errors"
 	"fmt"
-	"io"
 	"math/rand"
 	"net/http"
 	"strings"
@@ -27,7 +27,7 @@ type AppNashStore struct {
 	PackageName string           `json:"app_id"`
 	Id          string           `json:"id"`
 	Release     ReleaseNashStore `json:"release"`
-	Size        uint64
+	Size        uint64           `json:"-"`
 }
 
 type AppInfoNashStore struct {
@@ -100,7 +100,7 @@ func (s *NashStore) getAppInfo(packageName string) (AppInfoNashStore, error) {
 	}
 	payloadBytes, err := json.Marshal(payloadData)
 	if err != nil {
-		return appInfo, err
+		return appInfo, fmt.Errorf("failed to marshal app info request: %w", err)
 	}
 	payload := bytes.NewReader(payloadBytes)
 	req, err := s.NewRequest("POST", url, payload)
@@ -110,9 +110,8 @@ func (s *NashStore) getAppInfo(packageName string) (AppInfoNashStore, error) {
 	}
 
 	res, err := s.Net.Do(req)
-
 	if err != nil {
-		return appInfo, err
+		return appInfo, fmt.Errorf("failed to fetch app info: %w", err)
 	}
 
 	defer res.Body.Close()
@@ -121,25 +120,25 @@ func (s *NashStore) getAppInfo(packageName string) (AppInfoNashStore, error) {
 		return appInfo, err
 	}
 	if res.StatusCode != http.StatusOK {
-		return appInfo, fmt.Errorf("%s", "failed to get app info ("+res.Status+"): "+string(body))
+		return appInfo, fmt.Errorf("failed to get app info (%s): %s", res.Status, body)
 	}
 	var result map[string]any
 	if err := json.Unmarshal(body, &result); err != nil {
-		return appInfo, err
+		return appInfo, fmt.Errorf("failed to parse app info response: %w", err)
 	}
 	if list, ok := result["list"].([]any); ok {
 		if len(list) > 1 {
-			return appInfo, fmt.Errorf("multiple apps found")
+			return appInfo, errors.New("multiple apps found")
 		} else if len(list) == 0 {
 			return appInfo, &AppNotFoundError{PackageName: packageName}
 		}
 		if len(list) == 1 {
 			jsonAppInfo, err := json.Marshal(list[0])
 			if err != nil {
-				return appInfo, err
+				return appInfo, fmt.Errorf("failed to marshal app info entry: %w", err)
 			}
 			if err := json.Unmarshal(jsonAppInfo, &appInfo.App); err != nil {
-				return appInfo, err
+				return appInfo, fmt.Errorf("failed to unmarshal app info entry: %w", err)
 			}
 			appInfoMap, ok := list[0].(map[string]any)
 			if !ok {
@@ -147,20 +146,20 @@ func (s *NashStore) getAppInfo(packageName string) (AppInfoNashStore, error) {
 			}
 			sizeRaw, exists := appInfoMap["size"]
 			if !exists {
-				return appInfo, fmt.Errorf("failed to parse app info: field size is missing")
+				return appInfo, errors.New("failed to parse app info: field size is missing")
 			}
 			size, ok := sizeRaw.(float64)
 			if !ok {
 				return appInfo, fmt.Errorf("failed to parse app info: field size has unexpected type %T", sizeRaw)
 			}
 			if size < 0 {
-				return appInfo, fmt.Errorf("failed to parse app info: field size must be >= 0")
+				return appInfo, errors.New("failed to parse app info: field size must be >= 0")
 			}
 			appInfo.App.Size = uint64(size)
 			return appInfo, nil
 		}
 	}
-	return appInfo, fmt.Errorf("failed to parse app info")
+	return appInfo, errors.New("failed to parse app info")
 }
 
 func (s *NashStore) FindByPackage(packageName string, versionCode int) (Version, error) {
@@ -183,7 +182,7 @@ func (s *NashStore) FindByPackage(packageName string, versionCode int) (Version,
 	return version, nil
 }
 
-func (s *NashStore) Download(version Version) (io.ReadCloser, error) {
+func (s *NashStore) Download(version Version) (*DownloadStream, error) {
 	req, err := s.NewRequest("GET", version.Link, nil)
 	if err != nil {
 		return nil, err
@@ -205,9 +204,8 @@ func (s *NashStore) FindByDeveloper(developerId string) ([]string, error) {
 	}
 
 	res, err := s.Net.Do(req)
-
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("failed to fetch developer apps: %w", err)
 	}
 
 	defer res.Body.Close()
@@ -216,15 +214,15 @@ func (s *NashStore) FindByDeveloper(developerId string) ([]string, error) {
 		return nil, err
 	}
 	if res.StatusCode != http.StatusOK {
-		return nil, fmt.Errorf("%s", "failed to get app info ("+res.Status+"): "+string(body))
+		return nil, fmt.Errorf("failed to get app info (%s): %s", res.Status, body)
 	}
 	var result map[string]any
 	if err := json.Unmarshal(body, &result); err != nil {
-		return nil, err
+		return nil, fmt.Errorf("failed to parse developer apps response: %w", err)
 	}
 	appRaw, exists := result["app"]
 	if !exists {
-		return nil, fmt.Errorf("app not found")
+		return nil, errors.New("app not found")
 	}
 	app, ok := appRaw.(map[string]any)
 	if !ok || app == nil {
@@ -260,7 +258,7 @@ func (s *NashStore) FindByDeveloper(developerId string) ([]string, error) {
 		}
 		packageRaw, exists := appInfoMap["app_id"]
 		if !exists {
-			return nil, fmt.Errorf("failed to parse app info: field app_id is missing")
+			return nil, errors.New("failed to parse app info: field app_id is missing")
 		}
 		packageName, ok := packageRaw.(string)
 		if !ok {
@@ -324,7 +322,7 @@ func init() {
 		},
 		func(p NashStoreProfile) error {
 			if strings.TrimSpace(p.AppVersion) == "" {
-				return fmt.Errorf("appVersion cannot be empty")
+				return errors.New("appVersion cannot be empty")
 			}
 			if !appVersionRegexp.MatchString(p.AppVersion) {
 				return fmt.Errorf("appVersion %q is invalid", p.AppVersion)

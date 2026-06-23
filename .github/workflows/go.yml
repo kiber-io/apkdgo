@@ -14,6 +14,8 @@ on:
 jobs:
   build:
     name: build (${{ matrix.os }}-${{ matrix.arch }})
+    permissions:
+      contents: read
     runs-on: ubuntu-latest
     strategy:
       fail-fast: false
@@ -29,10 +31,12 @@ jobs:
     #     GITHUB_CONTEXT: ${{ toJson(github) }}
     #   run: echo "$GITHUB_CONTEXT"
 
-    - uses: actions/checkout@v4
+    - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
+      with:
+        persist-credentials: false
     
     - name: Set up Go
-      uses: actions/setup-go@v5
+      uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5.6.0
       with:
         go-version: ${{ matrix.go }}
         cache: true
@@ -71,7 +75,7 @@ jobs:
           ./apkd
 
     - name: Upload artifact
-      uses: actions/upload-artifact@v4
+      uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
       with:
         name: apkd-${{ matrix.os }}-${{ matrix.arch }}
         path: dist/apkd-${{ matrix.os }}-${{ matrix.arch }}*
