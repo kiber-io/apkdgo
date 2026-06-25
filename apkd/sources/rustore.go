@@ -43,8 +43,8 @@ func (s *RuStore) Name() string {
 
 func defaultRuStoreProfile() RuStoreProfile {
 	return RuStoreProfile{
-		AppVersion:     "1.93.0.3",
-		AppVersionCode: "1093003",
+		AppVersion:     "1.103.1.0",
+		AppVersionCode: "1103100",
 		FirmwareLang:   "ru",
 	}
 }
