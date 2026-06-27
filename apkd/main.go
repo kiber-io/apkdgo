@@ -518,7 +518,7 @@ func main() {
 	rootCmd.PersistentFlags().BoolVarP(&forceDownload, "force", "F", valueOrZero(builtInDefaultConfig.Defaults.Force), "force download even if the file already exists")
 	rootCmd.PersistentFlags().StringVarP(&outputDir, "output-dir", "O", valueOrZero(builtInDefaultConfig.Defaults.OutputDir), "output directory for downloaded APKs")
 	rootCmd.PersistentFlags().StringVarP(&outputFileName, "output-file", "o", "", "output file name for downloaded APKs")
-	rootCmd.PersistentFlags().CountVarP(&verbosity, "verbose", "v", "Set verbosity level. Use -v or -vv for more verbosity")
+	rootCmd.PersistentFlags().CountVarP(&verbosity, "verbose", "v", "set verbosity level. Use -v or -vv for more verbosity")
 	rootCmd.PersistentFlags().BoolVarP(&listSources, "list-sources", "l", false, "list available sources")
 	rootCmd.PersistentFlags().BoolVarP(&printVersion, "version", "V", false, "print version and exit")
 
