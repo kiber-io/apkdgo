@@ -140,7 +140,7 @@ apkd --config ./apkd.yaml --proxy http://127.0.0.1:8080 -p org.fdroid.fdroid
 
 ## Configuration
 
-Config format is YAML (`version: 1`). Precedence is:
+Config format is YAML. Current version is `2`. Precedence is:
 
 1. CLI flags
 2. Config values
@@ -152,10 +152,10 @@ Relative paths in config (for example `defaults.output_dir`) are resolved relati
 Default config lookup path (when `--config` is omitted):
 - `~/.config/apkd/config.yml`
 
-Example `apkd.yaml`:
+Example `apkd.yaml` (version 2):
 
 ```yaml
-version: 1
+version: 2
 
 defaults:
   sources: [rustore, fdroid]
@@ -181,13 +181,43 @@ network:
 
 sources:
   rustore:
+    app_version: "1.103.1.0"
+    app_version_code: "1103100"
+    headers:
+      User-Agent: "RuStore/1.103.1.0 ..."
+      ruStoreVerCode: "1103100"
+```
+
+### Config version 2 changes
+
+In version 2, source profile fields (`app_version`, `app_version_code`, `firmware_lang`, etc.) are placed directly under the source key instead of under a nested `profile:` key used in version 1:
+
+```yaml
+# version 1
+sources:
+  rustore:
     profile:
       app_version: "1.93.0.3"
       app_version_code: "1093003"
     headers:
-      User-Agent: "RuStore/1.93.0.3 (Android 14; SDK 34; arm64-v8a; Pixel 7; ru)"
+      User-Agent: "RuStore/1.93.0.3 ..."
       ruStoreVerCode: "1093003"
+
+# version 2
+sources:
+  rustore:
+    app_version: "1.103.1.0"
+    app_version_code: "1103100"
+    headers:
+      User-Agent: "RuStore/1.103.1.0 ..."
+      ruStoreVerCode: "1103100"
 ```
+
+Version 1 configs are still supported for backward compatibility and are automatically converted on load.
+
+### RuStore auto-update
+
+If no source config is provided for RuStore (or profile fields are left at their built-in defaults), the tool automatically fetches the latest RuStore app version on first request and updates the relevant headers. To pin a specific version, set `app_version` and `app_version_code` explicitly.
 
 ## License
 
