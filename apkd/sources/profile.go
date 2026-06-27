@@ -12,6 +12,7 @@ import (
 )
 
 type BaseSourceConfig struct {
+	BaseURL string            `yaml:"base_url"`
 	Headers map[string]string `yaml:"headers"`
 }
 
@@ -170,7 +171,11 @@ func DecodeConfigNodeStrict(node *yaml.Node, out any) error {
 }
 
 func NormalizeBaseSourceConfig(config *BaseSourceConfig) {
-	if config == nil || len(config.Headers) == 0 {
+	if config == nil {
+		return
+	}
+	config.BaseURL = strings.TrimRight(strings.TrimSpace(config.BaseURL), "/")
+	if len(config.Headers) == 0 {
 		return
 	}
 	normalizedHeaders := make(map[string]string, len(config.Headers))

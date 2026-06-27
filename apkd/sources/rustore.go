@@ -56,6 +56,9 @@ func (s *RuStore) Name() string {
 
 func defaultRuStoreConfig() RuStoreConfig {
 	return RuStoreConfig{
+		BaseSourceConfig: BaseSourceConfig{
+			BaseURL: "https://backapi.rustore.ru",
+		},
 		AppVersion:     "1.103.1.0",
 		AppVersionCode: "1103100",
 		FirmwareLang:   "ru",
@@ -91,7 +94,7 @@ func (s *RuStore) ensureLatestVersion() {
 }
 
 func (s *RuStore) getLatestRustoreVersion() (RuStoreUpdate, error) {
-	url := "https://backapi.rustore.ru/rustore-info/new-version"
+	url := s.config.BaseURL + "/rustore-info/new-version"
 	req, err := s.NewRequest("GET", url, nil)
 	if err != nil {
 		return RuStoreUpdate{}, err
@@ -185,7 +188,7 @@ func (s *RuStore) getAppInfo(packageName string) (map[string]any, error) {
 	}
 	// If the app info is not in the cache, fetch it from the API
 	// and store it in the cache
-	url := "https://backapi.rustore.ru/applicationData/overallInfo/" + packageName
+	url := s.config.BaseURL + "/applicationData/overallInfo/" + packageName
 	req, err := s.NewRequest("GET", url, nil)
 	if err != nil {
 		return nil, err
@@ -235,7 +238,7 @@ func (s *RuStore) getAppInfo(packageName string) (map[string]any, error) {
 
 func (s *RuStore) getDownloadLink(appId float64) (string, error) {
 	s.ensureLatestVersion()
-	url := "https://backapi.rustore.ru/applicationData/v2/download-link"
+	url := s.config.BaseURL + "/applicationData/v2/download-link"
 	payloadData := map[string]any{
 		"appId":                appId,
 		"firstInstall":         true,
@@ -351,7 +354,7 @@ func (s *RuStore) MaxParallelsDownloads() int {
 
 func (s *RuStore) FindByDeveloper(developerId string) ([]string, error) {
 	s.ensureLatestVersion()
-	url := "https://backapi.rustore.ru/applicationData/devs/" + developerId + "/apps?limit=1000"
+	url := s.config.BaseURL + "/applicationData/devs/" + developerId + "/apps?limit=1000"
 	req, err := s.NewRequest("GET", url, nil)
 	if err != nil {
 		return nil, err

@@ -33,8 +33,8 @@ func TestParseVersionCodeTextMalformed(t *testing.T) {
 }
 
 func TestApkComboProfileBaseURLIsUsed(t *testing.T) {
-	s := &ApkCombo{baseURL: "https://mirror.example"}
-	if s.baseURL != "https://mirror.example" {
+	s := &ApkCombo{config: ApkComboConfig{BaseSourceConfig: BaseSourceConfig{BaseURL: "https://mirror.example"}}}
+	if s.config.BaseURL != "https://mirror.example" {
 		t.Fatalf("expected custom baseURL to be preserved")
 	}
 }

@@ -40,6 +40,7 @@ type AppInfo struct {
 
 type FDroid struct {
 	BaseSource
+	config      FDroidConfig
 	jsonCacheMu sync.Mutex
 	jsonCache   map[string]any
 }
@@ -51,6 +52,9 @@ type FDroidConfig struct {
 
 func defaultFDroidConfig() FDroidConfig {
 	return FDroidConfig{
+		BaseSourceConfig: BaseSourceConfig{
+			BaseURL: "https://f-droid.org",
+		},
 		AppVersion: "1.23.1",
 	}
 }
@@ -60,7 +64,7 @@ func (s *FDroid) Name() string {
 }
 
 func (s *FDroid) Download(version Version) (*DownloadStream, error) {
-	req, err := s.NewRequest("GET", "https://f-droid.org/repo"+version.Link, nil)
+	req, err := s.NewRequest("GET", s.config.BaseURL+"/repo"+version.Link, nil)
 	if err != nil {
 		return nil, err
 	}
@@ -73,7 +77,7 @@ func (s *FDroid) getJson() (map[string]any, error) {
 	if s.jsonCache != nil {
 		return s.jsonCache, nil
 	}
-	url := "https://f-droid.org/repo/index-v2.json"
+	url := s.config.BaseURL + "/repo/index-v2.json"
 
 	req, err := s.NewRequest("GET", url, nil)
 
@@ -246,6 +250,7 @@ func newFDroidSource() (Source, error) {
 	if err != nil {
 		return nil, err
 	}
+	s.config = config
 	s.Log().Logd(fmt.Sprintf("Using config: %+v", config))
 	headers := ApplyConfiguredHeaders(http.Header{
 		"User-Agent": {"F-Droid " + config.AppVersion},

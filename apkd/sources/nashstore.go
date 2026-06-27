@@ -36,7 +36,7 @@ type AppInfoNashStore struct {
 
 type NashStore struct {
 	BaseSource
-
+	config NashStoreConfig
 	device devices.Device
 }
 
@@ -48,6 +48,9 @@ type NashStoreConfig struct {
 
 func defaultNashStoreConfig() NashStoreConfig {
 	return NashStoreConfig{
+		BaseSourceConfig: BaseSourceConfig{
+			BaseURL: "https://store.nashstore.ru",
+		},
 		AppVersion: "0.0.6",
 	}
 }
@@ -92,7 +95,7 @@ func randomSemVer() string {
 
 func (s *NashStore) getAppInfo(packageName string) (AppInfoNashStore, error) {
 	var appInfo AppInfoNashStore
-	url := "https://store.nashstore.ru/api/mobile/v1/profile/updates"
+	url := s.config.BaseURL + "/api/mobile/v1/profile/updates"
 	payloadData := map[string]any{
 		"apps": map[string]any{
 			packageName: map[string]any{
@@ -202,7 +205,7 @@ func (s *NashStore) MaxParallelsDownloads() int {
 }
 
 func (s *NashStore) FindByDeveloper(developerId string) ([]string, error) {
-	url := "https://store.nashstore.ru/api/mobile/v1/application/" + developerId
+	url := s.config.BaseURL + "/api/mobile/v1/application/" + developerId
 
 	req, err := s.NewRequest("GET", url, nil)
 
@@ -306,6 +309,7 @@ func newNashStoreSource() (Source, error) {
 	if err != nil {
 		return nil, fmt.Errorf("failed to decode nashstore config: %w", err)
 	}
+	s.config = config
 	if config.Token != "" {
 		tok = config.Token
 	}

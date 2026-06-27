@@ -20,7 +20,7 @@ import (
 
 type ApkCombo struct {
 	BaseSource
-	baseURL string
+	config ApkComboConfig
 }
 
 type apkComboVersionItem struct {
@@ -32,7 +32,6 @@ type apkComboVersionItem struct {
 
 type ApkComboConfig struct {
 	BaseSourceConfig `yaml:",inline"`
-	BaseURL          string `yaml:"base_url"`
 }
 
 func (s *ApkCombo) fetchDocument(url string) (*goquery.Document, *neturl.URL, error) {
@@ -219,7 +218,7 @@ func (s *ApkCombo) tryToFindOldVersion(link string, versionCode int) (apkComboVe
 			s.Log().Logw("Version item has empty href attribute")
 			return true
 		}
-		versionLink, err = neturl.JoinPath(s.baseURL, versionLink)
+		versionLink, err = neturl.JoinPath(s.config.BaseURL, versionLink)
 		if err != nil {
 			s.Log().Logw(fmt.Sprintf("Failed to join version link path: %v", err))
 			return true
@@ -244,7 +243,7 @@ func (s *ApkCombo) tryToFindOldVersion(link string, versionCode int) (apkComboVe
 			if !exists {
 				s.Log().Logw("Last pagination button missing href attribute")
 			} else {
-				base, _ := neturl.Parse(s.baseURL)
+				base, _ := neturl.Parse(s.config.BaseURL)
 				ref, err := neturl.Parse(href)
 				if err != nil {
 					s.Log().Logw(fmt.Sprintf("Failed to parse next page URL: %v", err))
@@ -260,7 +259,7 @@ func (s *ApkCombo) tryToFindOldVersion(link string, versionCode int) (apkComboVe
 }
 
 func (s *ApkCombo) checkin(referer string) (string, error) {
-	url := fmt.Sprintf("%s/checkin", s.baseURL)
+	url := fmt.Sprintf("%s/checkin", s.config.BaseURL)
 	req, err := s.NewRequest("GET", url, nil)
 	if err != nil {
 		return "", err
@@ -294,7 +293,7 @@ func (s *ApkCombo) checkin(referer string) (string, error) {
 func (s *ApkCombo) FindByPackage(packageName string, versionCode int) (Version, error) {
 	var version Version
 
-	packageURL := fmt.Sprintf("%s/search/?q=%s", s.baseURL, packageName)
+	packageURL := fmt.Sprintf("%s/search/?q=%s", s.config.BaseURL, packageName)
 	doc, resolvedPackageURL, err := s.fetchDocument(packageURL)
 	if err != nil {
 		return version, err
@@ -356,7 +355,7 @@ func (s *ApkCombo) FindByPackage(packageName string, versionCode int) (Version, 
 func (s *ApkCombo) FindByDeveloper(developerId string) ([]string, error) {
 	var packages []string
 
-	url := fmt.Sprintf("%s/developer/%s", s.baseURL, developerId)
+	url := fmt.Sprintf("%s/developer/%s", s.config.BaseURL, developerId)
 	req, err := s.NewRequest("GET", url, nil)
 	if err != nil {
 		return packages, err
@@ -382,7 +381,7 @@ func (s *ApkCombo) FindByDeveloper(developerId string) ([]string, error) {
 			err = errors.New("link attribute not found")
 			return false
 		}
-		link, err = neturl.JoinPath(s.baseURL, link)
+		link, err = neturl.JoinPath(s.config.BaseURL, link)
 		if err != nil {
 			err = fmt.Errorf("failed to join path: %w", err)
 			return false
@@ -400,7 +399,9 @@ func (s *ApkCombo) FindByDeveloper(developerId string) ([]string, error) {
 
 func defaultApkComboConfig() ApkComboConfig {
 	return ApkComboConfig{
-		BaseURL: "https://apkcombo.com",
+		BaseSourceConfig: BaseSourceConfig{
+			BaseURL: "https://apkcombo.com",
+		},
 	}
 }
 
@@ -415,7 +416,7 @@ func newApkComboSource() (Source, error) {
 	if err != nil {
 		return nil, fmt.Errorf("failed to decode apkcombo config: %w", err)
 	}
-	s.baseURL = config.BaseURL
+	s.config = config
 	randomUA := ua.Filter().Platform(fakeUserAgent.Desktop).Browser(fakeUserAgent.Firefox, fakeUserAgent.Chrome).Get()
 	s.Log().Logd("Using User-Agent: " + randomUA)
 	headers := ApplyConfiguredHeaders(http.Header{
@@ -435,7 +436,7 @@ func newApkComboSource() (Source, error) {
 
 func init() {
 	RegisterSourceFactoryWithConfig(newApkComboSource, "apkcombo", NewConfigDecoderWithDefaults(
-		ApkComboConfig{},
+		defaultApkComboConfig(),
 		func(c *ApkComboConfig) {
 			NormalizeBaseSourceConfig(&c.BaseSourceConfig)
 		},
