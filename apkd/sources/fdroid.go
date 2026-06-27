@@ -250,7 +250,7 @@ func newFDroidSource() (Source, error) {
 	headers := ApplyConfiguredHeaders(http.Header{
 		"User-Agent": {"F-Droid " + config.AppVersion},
 	}, config.Headers)
-	s.Net = network.DefaultClientForSource(s.Name()).WithDefaultHeaders(headers)
+	s.Net = network.DefaultClientForSource(s.Name()).WithDefaultHeaders(headers).DisableHTTP2()
 	return s, nil
 }
 

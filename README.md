@@ -20,9 +20,10 @@ apkd [flags]
 ### Flags
 
 - `--package`, `-p`:
-  Specify the package name(s) of the app(s) to download. Example:
+  Specify the package name(s) of the app(s) to download. You can optionally pin a specific version code using the format `<pkg>:<version code>`. Examples:
   ```bash
   apkd -p com.example.app
+  apkd -p com.example.app:123456
   ```
 
 - `--source`, `-s`:
@@ -39,9 +40,15 @@ apkd [flags]
   ```
 
 - `--file`, `-f`:
-  Provide a file containing a list of package names. Example:
+  Provide a file containing a list of package names. Each line can be either `<pkg>` or `<pkg>:<version code>`. Example:
   ```bash
   apkd -f packages.txt
+  ```
+
+  Example `packages.txt`:
+  ```text
+  com.example.app
+  com.example.otherapp:123456
   ```
 
 - `--dev`:
@@ -116,6 +123,11 @@ apkd [flags]
 Download an APK for a specific package from a specific source:
 ```bash
 apkd -p com.example.app -s apkpure -O ./downloads
+```
+
+Download a specific version code:
+```bash
+apkd -p com.example.app:123456 -s fdroid -O ./downloads
 ```
 
 Use global debug proxy:

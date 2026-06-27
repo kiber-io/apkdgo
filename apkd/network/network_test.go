@@ -174,6 +174,57 @@ func TestDoWithWithoutClientTimeoutDisablesHTTPClientTimeout(t *testing.T) {
 	}
 }
 
+func TestWithCheckRedirect(t *testing.T) {
+	if req := WithCheckRedirect(nil, nil); req != nil {
+		t.Fatalf("expected nil request to stay nil")
+	}
+
+	var sawReferer string
+	baseHTTPClient := &http.Client{
+		Transport: roundTripFunc(func(req *http.Request) (*http.Response, error) {
+			return &http.Response{
+				StatusCode: http.StatusFound,
+				Status:     "302 Found",
+				Header:     http.Header{"Location": []string{"https://example.com/final"}},
+				Body:       io.NopCloser(strings.NewReader("")),
+				Request:    req,
+			}, nil
+		}),
+		CheckRedirect: func(req *http.Request, via []*http.Request) error {
+			sawReferer = req.Header.Get("Referer")
+			return http.ErrUseLastResponse
+		},
+	}
+	client := &Client{
+		doer: baseHTTPClient,
+		retry: &RetryPolice{
+			MaxAttempts: 1,
+			Delay:       1,
+			MaxDelay:    1,
+		},
+	}
+
+	req, err := http.NewRequestWithContext(context.Background(), http.MethodGet, "https://example.com/start", http.NoBody)
+	if err != nil {
+		t.Fatalf("unexpected request error: %v", err)
+	}
+	req.Header.Set("Referer", "https://example.com/origin")
+	req = WithCheckRedirect(req, func(req *http.Request, via []*http.Request) error {
+		req.Header.Del("Referer")
+		sawReferer = req.Header.Get("Referer")
+		return http.ErrUseLastResponse
+	})
+
+	resp, err := client.Do(req)
+	if err != nil {
+		t.Fatalf("unexpected request error: %v", err)
+	}
+	resp.Body.Close()
+	if sawReferer != "" {
+		t.Fatalf("expected referer to be removed on redirect, got %q", sawReferer)
+	}
+}
+
 func TestDoClosesResponseBodyBeforeRetry(t *testing.T) {
 	firstBody := &trackingReadCloser{}
 	secondBody := &trackingReadCloser{}

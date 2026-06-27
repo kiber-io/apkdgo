@@ -84,6 +84,12 @@ func (s *NashStore) getRandomTimestamp() int64 {
 	return timestampMillis
 }
 
+func randomSemVer() string {
+	major := rand.Intn(10)
+	patch := rand.Intn(100)
+	return fmt.Sprintf("%d.%d", major, patch)
+}
+
 func (s *NashStore) getAppInfo(packageName string) (AppInfoNashStore, error) {
 	var appInfo AppInfoNashStore
 	url := "https://store.nashstore.ru/api/mobile/v1/profile/updates"
@@ -91,10 +97,10 @@ func (s *NashStore) getAppInfo(packageName string) (AppInfoNashStore, error) {
 		"apps": map[string]any{
 			packageName: map[string]any{
 				"appName":          packageName,
-				"versionName":      "1.0",
+				"versionName":      randomSemVer(),
 				"firstInstallTime": s.getRandomTimestamp(),
 				"lastUpdateTime":   s.getRandomTimestamp(),
-				"versionCode":      1,
+				"versionCode":      rand.Intn(100) + 1,
 				"packageName":      packageName,
 			},
 		},
