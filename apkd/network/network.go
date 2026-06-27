@@ -25,13 +25,11 @@ var reqSeq uint64
 var logger = logging.Named("network")
 var proxyConfigMu sync.RWMutex
 var clientDefaultsMu sync.RWMutex
-var sourceHeadersMu sync.RWMutex
 var globalProxyURL *url.URL
 var sourceProxyURLs = map[string]*url.URL{}
 var proxyInsecureSkipVerify bool
 var defaultClientTimeout = 30 * time.Second
 var defaultRetryPolicy = DefaultRetryPolice()
-var sourceHeaderOverrides = map[string]http.Header{}
 
 func nextRequestID() uint64 {
 	n := atomic.AddUint64(&reqSeq, 1)
@@ -40,6 +38,12 @@ func nextRequestID() uint64 {
 
 type Doer interface {
 	Do(req *http.Request) (*http.Response, error)
+}
+
+type DefaultHeadersConfigurer interface {
+	SetDefaultHeaders(headers http.Header) *Client
+	UpdateDefaultHeaders(headers http.Header) *Client
+	DefaultHeaders() http.Header
 }
 
 type retryIfCtxKey struct{}
@@ -87,6 +91,7 @@ type Client struct {
 	doer           Doer
 	retry          *RetryPolice
 	defaultHeaders http.Header
+	defaultMu      sync.RWMutex
 }
 
 func DefaultClient() *Client {
@@ -216,50 +221,15 @@ func ConfigureClientDefaults(timeout *time.Duration, retryPolicy *RetryPolice) e
 	return nil
 }
 
-func ConfigureSourceHeaderOverrides(sourceHeaders map[string]map[string]string) error {
-	normalized := make(map[string]http.Header, len(sourceHeaders))
-	for sourceName, headers := range sourceHeaders {
-		normalizedSourceName := strings.ToLower(strings.TrimSpace(sourceName))
-		if normalizedSourceName == "" {
-			return errors.New("source name cannot be empty in source header map")
-		}
-		normalizedHeaders := make(http.Header, len(headers))
-		for headerName, headerValue := range headers {
-			normalizedHeaderName := http.CanonicalHeaderKey(strings.TrimSpace(headerName))
-			if normalizedHeaderName == "" {
-				return fmt.Errorf("header name cannot be empty for source %s", normalizedSourceName)
-			}
-			normalizedHeaders.Set(normalizedHeaderName, strings.TrimSpace(headerValue))
-		}
-		normalized[normalizedSourceName] = normalizedHeaders
+func cloneHeaders(headers http.Header) http.Header {
+	if headers == nil {
+		return http.Header{}
 	}
-
-	sourceHeadersMu.Lock()
-	sourceHeaderOverrides = normalized
-	sourceHeadersMu.Unlock()
-	return nil
-}
-
-func ApplySourceHeaderOverrides(sourceName string, baseHeaders http.Header) http.Header {
-	resolvedHeaders := make(http.Header, len(baseHeaders))
-	for headerName, values := range baseHeaders {
-		resolvedHeaders[headerName] = append([]string(nil), values...)
+	cloned := make(http.Header, len(headers))
+	for headerName, values := range headers {
+		cloned[headerName] = append([]string(nil), values...)
 	}
-	normalizedSourceName := strings.ToLower(strings.TrimSpace(sourceName))
-	if normalizedSourceName == "" {
-		return resolvedHeaders
-	}
-
-	sourceHeadersMu.RLock()
-	sourceOverrides := sourceHeaderOverrides[normalizedSourceName]
-	sourceHeadersMu.RUnlock()
-	if len(sourceOverrides) == 0 {
-		return resolvedHeaders
-	}
-	for headerName, values := range sourceOverrides {
-		resolvedHeaders[headerName] = append([]string(nil), values...)
-	}
-	return resolvedHeaders
+	return cloned
 }
 
 func currentClientTimeout() time.Duration {
@@ -304,8 +274,45 @@ func isProxyInsecureSkipVerifyEnabled() bool {
 }
 
 func (c *Client) WithDefaultHeaders(headers http.Header) *Client {
-	c.defaultHeaders = headers
+	c.SetDefaultHeaders(headers)
 	return c
+}
+
+func (c *Client) SetDefaultHeaders(headers http.Header) *Client {
+	c.defaultMu.Lock()
+	c.defaultHeaders = cloneHeaders(headers)
+	c.defaultMu.Unlock()
+	return c
+}
+
+func (c *Client) UpdateDefaultHeaders(headers http.Header) *Client {
+	if len(headers) == 0 {
+		return c
+	}
+	c.defaultMu.Lock()
+	if c.defaultHeaders == nil {
+		c.defaultHeaders = make(http.Header, len(headers))
+	}
+	for key, values := range headers {
+		c.defaultHeaders[key] = append([]string(nil), values...)
+	}
+	c.defaultMu.Unlock()
+	return c
+}
+
+func (c *Client) DefaultHeaders() http.Header {
+	c.defaultMu.RLock()
+	defer c.defaultMu.RUnlock()
+	return cloneHeaders(c.defaultHeaders)
+}
+
+func UpdateDoerDefaultHeaders(doer Doer, headers http.Header) error {
+	configurer, ok := doer.(DefaultHeadersConfigurer)
+	if !ok {
+		return fmt.Errorf("doer %T does not support default headers configuration", doer)
+	}
+	configurer.UpdateDefaultHeaders(headers)
+	return nil
 }
 
 func (c *Client) WithRetryIf(decider RetryDecider) *Client {
@@ -352,8 +359,9 @@ func (c *Client) Do(req *http.Request) (*http.Response, error) {
 		activeLogger = reqLogger
 	}
 	logContext := requestLogContext(reqId, module)
-	if c.defaultHeaders != nil {
-		for key, values := range c.defaultHeaders {
+	defaultHeaders := c.DefaultHeaders()
+	if defaultHeaders != nil {
+		for key, values := range defaultHeaders {
 			for _, value := range values {
 				req.Header.Add(key, value)
 			}

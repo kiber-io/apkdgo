@@ -3,7 +3,6 @@ package main
 import (
 	"errors"
 	"fmt"
-	"maps"
 	"os"
 	"os/signal"
 	"path/filepath"
@@ -83,10 +82,6 @@ var rootCmd = cobra.Command{
 		for _, overrideLog := range configOverrideLogs {
 			logging.Logd(overrideLog)
 		}
-		if err := network.ConfigureSourceHeaderOverrides(resolvedCfg.sourceHeaders); err != nil {
-			fmt.Printf("Error applying source header settings: %v\n", err)
-			os.Exit(1)
-		}
 		network.ResetClientDefaults()
 		if err := network.ConfigureClientDefaults(resolvedCfg.clientTimeout, resolvedCfg.retryPolicy); err != nil {
 			fmt.Printf("Error applying network settings: %v\n", err)
@@ -102,7 +97,7 @@ var rootCmd = cobra.Command{
 			fmt.Printf("Error applying proxy settings: %v\n", err)
 			os.Exit(1)
 		}
-		sources.ConfigureSourceProfiles(resolvedCfg.sourceProfiles)
+		sources.ConfigureSourceConfigs(resolvedCfg.sourceConfigs)
 
 		if err := sources.InitializeRegisteredSources(); err != nil {
 			fmt.Printf("Error initializing sources: %v\n", err)
@@ -273,8 +268,7 @@ func reportDownloadSuccess() {
 
 type resolvedConfig struct {
 	path                  string
-	sourceHeaders         map[string]map[string]string
-	sourceProfiles        map[string]any
+	sourceConfigs         map[string]any
 	configuredSourceNames map[string]struct{}
 	clientTimeout         *time.Duration
 	retryPolicy           *network.RetryPolice
@@ -282,8 +276,7 @@ type resolvedConfig struct {
 
 func applyConfig(cmd *cobra.Command) (*resolvedConfig, []string, error) {
 	resolved := &resolvedConfig{
-		sourceHeaders:         make(map[string]map[string]string),
-		sourceProfiles:        make(map[string]any),
+		sourceConfigs:         make(map[string]any),
 		configuredSourceNames: make(map[string]struct{}),
 	}
 	configPath, err := resolveConfigPath(configFile)
@@ -382,21 +375,13 @@ func applyConfig(cmd *cobra.Command) (*resolvedConfig, []string, error) {
 	}
 	for sourceName, sourceCfg := range cfg.Sources {
 		resolved.configuredSourceNames[sourceName] = struct{}{}
-		if sourceCfg.Profile != nil && sourceCfg.Profile.Node != nil {
-			profile, err := sources.DecodeSourceProfile(sourceName, sourceCfg.Profile.Node)
-			if err != nil && !errors.Is(err, sources.ErrNoProfile) {
-				return nil, nil, fmt.Errorf("invalid sources.%s.profile: %w", sourceName, err)
-			}
-			if profile != nil {
-				resolved.sourceProfiles[sourceName] = profile
-			}
+		sourceConfig, err := sources.DecodeSourceConfig(sourceName, sourceCfg.Node)
+		if err != nil && !errors.Is(err, sources.ErrNoConfig) {
+			return nil, nil, fmt.Errorf("invalid sources.%s: %w", sourceName, err)
 		}
-		if len(sourceCfg.Headers) == 0 {
-			continue
+		if sourceConfig != nil {
+			resolved.sourceConfigs[sourceName] = sourceConfig
 		}
-		headers := make(map[string]string, len(sourceCfg.Headers))
-		maps.Copy(headers, sourceCfg.Headers)
-		resolved.sourceHeaders[sourceName] = headers
 	}
 
 	return resolved, overrideLogs, nil

@@ -123,11 +123,11 @@ func RegisterSourceFactory(factory SourceFactory) {
 	sourceFactories = append(sourceFactories, factory)
 }
 
-func RegisterSourceFactoryWithProfile(factory SourceFactory, sourceName string, profileDecoder ProfileDecoder) {
+func RegisterSourceFactoryWithConfig(factory SourceFactory, sourceName string, configDecoder ConfigDecoder) {
 	RegisterSourceFactory(factory)
-	if profileDecoder != nil {
-		if err := RegisterSourceProfileDecoder(sourceName, profileDecoder); err != nil {
-			sourceFactoryRegistrationErrors = append(sourceFactoryRegistrationErrors, fmt.Errorf("failed to register profile decoder for source %q: %w", sourceName, err))
+	if configDecoder != nil {
+		if err := RegisterSourceConfigDecoder(sourceName, configDecoder); err != nil {
+			sourceFactoryRegistrationErrors = append(sourceFactoryRegistrationErrors, fmt.Errorf("failed to register config decoder for source %q: %w", sourceName, err))
 		}
 	}
 }
@@ -135,7 +135,7 @@ func RegisterSourceFactoryWithProfile(factory SourceFactory, sourceName string, 
 func InitializeRegisteredSources() error {
 	initializeRegisteredSourcesOnce.Do(func() {
 		if len(sourceFactoryRegistrationErrors) > 0 {
-			initializeRegisteredSourcesErr = fmt.Errorf("failed to register source profile decoders: %w", errors.Join(sourceFactoryRegistrationErrors...))
+			initializeRegisteredSourcesErr = fmt.Errorf("failed to register source config decoders: %w", errors.Join(sourceFactoryRegistrationErrors...))
 			return
 		}
 

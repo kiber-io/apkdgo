@@ -1,10 +1,10 @@
 package main
 
 import (
+	"bytes"
 	"errors"
 	"fmt"
 	"io"
-	"net/http"
 	"os"
 	"path/filepath"
 	"strings"
@@ -22,7 +22,7 @@ type AppConfig struct {
 }
 
 const (
-	defaultConfigVersion   = 1
+	defaultConfigVersion   = 2
 	defaultConfigVerbosity = 1
 	defaultConfigWorkers   = 3
 )
@@ -98,17 +98,38 @@ type ConfigProxy struct {
 }
 
 type SourceConfig struct {
-	Profile *SourceProfileNode `yaml:"profile"`
-	Headers map[string]string  `yaml:"headers"`
-}
-
-type SourceProfileNode struct {
 	Node *yaml.Node
 }
 
-func (n *SourceProfileNode) UnmarshalYAML(value *yaml.Node) error { //nolint:unparam // implements yaml.Unmarshaler
-	n.Node = value
+func (c *SourceConfig) UnmarshalYAML(value *yaml.Node) error {
+	c.Node = cloneYAMLNode(value)
 	return nil
+}
+
+type RawYAMLNode struct {
+	Node *yaml.Node
+}
+
+func (n *RawYAMLNode) UnmarshalYAML(value *yaml.Node) error {
+	n.Node = cloneYAMLNode(value)
+	return nil
+}
+
+func cloneYAMLNode(node *yaml.Node) *yaml.Node {
+	if node == nil {
+		return nil
+	}
+	cloned := *node
+	if len(node.Content) > 0 {
+		cloned.Content = make([]*yaml.Node, len(node.Content))
+		for i, child := range node.Content {
+			cloned.Content[i] = cloneYAMLNode(child)
+		}
+	}
+	if node.Alias != nil {
+		cloned.Alias = cloneYAMLNode(node.Alias)
+	}
+	return &cloned
 }
 
 func defaultConfigPath() (string, error) {
@@ -143,13 +164,13 @@ func resolveConfigPath(path string) (string, error) {
 }
 
 func loadConfig(path string) (*AppConfig, error) {
-	cfg := cloneBuiltInDefaultConfig()
 	normalizedPath := strings.TrimSpace(path)
 	configDir := ""
 	if normalizedPath != "" {
 		configDir = filepath.Dir(normalizedPath)
 	}
 	if normalizedPath == "" {
+		cfg := cloneBuiltInDefaultConfig()
 		if err := normalizeConfig(cfg, configDir); err != nil {
 			return nil, err
 		}
@@ -162,23 +183,22 @@ func loadConfig(path string) (*AppConfig, error) {
 	}
 	defer file.Close()
 
-	decoder := yaml.NewDecoder(file)
-	decoder.KnownFields(true)
-	if err := decoder.Decode(cfg); err != nil {
-		if errors.Is(err, io.EOF) {
-			if err := normalizeConfig(cfg, configDir); err != nil {
-				return nil, err
-			}
-			return cfg, nil
-		}
-		return nil, fmt.Errorf("failed to decode config: %w", err)
+	cfg := cloneBuiltInDefaultConfig()
+	configBytes, err := io.ReadAll(file)
+	if err != nil {
+		return nil, fmt.Errorf("failed to read config file %s: %w", normalizedPath, err)
 	}
-	var extraDoc any
-	if err := decoder.Decode(&extraDoc); !errors.Is(err, io.EOF) {
-		if err == nil {
-			return nil, errors.New("multiple YAML documents are not supported")
+	if strings.TrimSpace(string(configBytes)) == "" {
+		if err := normalizeConfig(cfg, configDir); err != nil {
+			return nil, err
 		}
-		return nil, fmt.Errorf("failed to check for multiple YAML documents: %w", err)
+		return cfg, nil
+	}
+	if err := ensureSingleYAMLDocument(configBytes); err != nil {
+		return nil, err
+	}
+	if err := decodeYAMLBytesStrict(configBytes, cfg); err != nil {
+		return nil, err
 	}
 	if err := normalizeConfig(cfg, configDir); err != nil {
 		return nil, err
@@ -189,9 +209,6 @@ func loadConfig(path string) (*AppConfig, error) {
 func normalizeConfig(cfg *AppConfig, configDir string) error {
 	if cfg.Version == 0 {
 		cfg.Version = defaultConfigVersion
-	}
-	if cfg.Version != defaultConfigVersion {
-		return fmt.Errorf("unsupported config version %d", cfg.Version)
 	}
 
 	if cfg.Defaults.Verbose != nil && *cfg.Defaults.Verbose < 0 {
@@ -250,18 +267,37 @@ func normalizeConfig(cfg *AppConfig, configDir string) error {
 		if normalizedSourceName == "" {
 			return errors.New("sources contains an empty source name")
 		}
-		normalizedHeaders := make(map[string]string, len(sourceCfg.Headers))
-		for headerName, headerValue := range sourceCfg.Headers {
-			normalizedHeaderName := http.CanonicalHeaderKey(strings.TrimSpace(headerName))
-			if normalizedHeaderName == "" {
-				return fmt.Errorf("sources.%s.headers contains an empty header name", normalizedSourceName)
-			}
-			normalizedHeaders[normalizedHeaderName] = strings.TrimSpace(headerValue)
-		}
-		sourceCfg.Headers = normalizedHeaders
 		normalizedSourceCfg[normalizedSourceName] = sourceCfg
 	}
 	cfg.Sources = normalizedSourceCfg
 
+	return nil
+}
+
+func decodeYAMLBytesStrict(data []byte, out any) error {
+	decoder := yaml.NewDecoder(bytes.NewReader(data))
+	decoder.KnownFields(true)
+	if err := decoder.Decode(out); err != nil {
+		return fmt.Errorf("failed to decode config: %w", err)
+	}
+	return nil
+}
+
+func ensureSingleYAMLDocument(data []byte) error {
+	decoder := yaml.NewDecoder(bytes.NewReader(data))
+	var first any
+	if err := decoder.Decode(&first); err != nil {
+		if errors.Is(err, io.EOF) {
+			return nil
+		}
+		return fmt.Errorf("failed to decode config: %w", err)
+	}
+	var extraDoc any
+	if err := decoder.Decode(&extraDoc); !errors.Is(err, io.EOF) {
+		if err == nil {
+			return errors.New("multiple YAML documents are not supported")
+		}
+		return fmt.Errorf("failed to check for multiple YAML documents: %w", err)
+	}
 	return nil
 }

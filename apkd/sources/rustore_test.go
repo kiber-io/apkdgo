@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"sync"
 	"testing"
@@ -175,31 +176,31 @@ func TestExtractApkFromZipReturnsErrorWhenNoApkFound(t *testing.T) {
 	}
 }
 
-func TestDecodeRuStoreProfileDefaults(t *testing.T) {
+func TestDecodeRuStoreConfigDefaults(t *testing.T) {
 	var node yaml.Node
 	if err := yaml.Unmarshal([]byte("{}"), &node); err != nil {
 		t.Fatalf("failed to unmarshal yaml node: %v", err)
 	}
-	profileAny, err := DecodeSourceProfile("rustore", node.Content[0])
+	configAny, err := DecodeSourceConfig("rustore", node.Content[0])
 	if err != nil {
-		t.Fatalf("unexpected profile decode error: %v", err)
+		t.Fatalf("unexpected config decode error: %v", err)
 	}
-	profile, ok := profileAny.(RuStoreProfile)
+	config, ok := configAny.(RuStoreConfig)
 	if !ok {
-		t.Fatalf("unexpected profile type: %T", profileAny)
+		t.Fatalf("unexpected config type: %T", configAny)
 	}
-	expected := defaultRuStoreProfile()
-	if profile != expected {
-		t.Fatalf("unexpected default profile: got=%+v expected=%+v", profile, expected)
+	expected := defaultRuStoreConfig()
+	if !reflect.DeepEqual(config, expected) {
+		t.Fatalf("unexpected default config: got=%+v expected=%+v", config, expected)
 	}
 }
 
-func TestDecodeRuStoreProfileUnknownField(t *testing.T) {
+func TestDecodeRuStoreConfigUnknownField(t *testing.T) {
 	var node yaml.Node
 	if err := yaml.Unmarshal([]byte("{bad: value}"), &node); err != nil {
 		t.Fatalf("failed to unmarshal yaml node: %v", err)
 	}
-	if _, err := DecodeSourceProfile("rustore", node.Content[0]); err == nil {
+	if _, err := DecodeSourceConfig("rustore", node.Content[0]); err == nil {
 		t.Fatalf("expected decode error for unknown field")
 	}
 }

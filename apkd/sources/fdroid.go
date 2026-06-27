@@ -44,12 +44,13 @@ type FDroid struct {
 	jsonCache   map[string]any
 }
 
-type FDroidProfile struct {
-	AppVersion string `yaml:"appVersion"`
+type FDroidConfig struct {
+	BaseSourceConfig `yaml:",inline"`
+	AppVersion       string `yaml:"appVersion"`
 }
 
-func defaultFDroidProfile() FDroidProfile {
-	return FDroidProfile{
+func defaultFDroidConfig() FDroidConfig {
+	return FDroidConfig{
 		AppVersion: "1.23.1",
 	}
 }
@@ -241,31 +242,35 @@ func (s *FDroid) FindByDeveloper(developerId string) ([]string, error) {
 func newFDroidSource() (Source, error) {
 	s := &FDroid{}
 	s.Source = s
-	profile, err := ResolveSourceProfile(s.Name(), defaultFDroidProfile())
+	config, err := ResolveSourceConfig(s.Name(), defaultFDroidConfig())
 	if err != nil {
 		return nil, err
 	}
-	s.Log().Logd(fmt.Sprintf("Using profile: %+v", profile))
-	headers := network.ApplySourceHeaderOverrides(s.Name(), http.Header{
-		"User-Agent": {"F-Droid " + profile.AppVersion},
-	})
+	s.Log().Logd(fmt.Sprintf("Using config: %+v", config))
+	headers := ApplyConfiguredHeaders(http.Header{
+		"User-Agent": {"F-Droid " + config.AppVersion},
+	}, config.Headers)
 	s.Net = network.DefaultClientForSource(s.Name()).WithDefaultHeaders(headers)
 	return s, nil
 }
 
 func init() {
-	RegisterSourceFactoryWithProfile(newFDroidSource, "fdroid",
-		NewProfileDecoderWithDefaults(
-			defaultFDroidProfile(),
-			func(p *FDroidProfile) {
-				p.AppVersion = strings.TrimSpace(p.AppVersion)
+	RegisterSourceFactoryWithConfig(newFDroidSource, "fdroid",
+		NewConfigDecoderWithDefaults(
+			defaultFDroidConfig(),
+			func(c *FDroidConfig) {
+				NormalizeBaseSourceConfig(&c.BaseSourceConfig)
+				c.AppVersion = strings.TrimSpace(c.AppVersion)
 			},
-			func(p FDroidProfile) error {
-				if strings.TrimSpace(p.AppVersion) == "" {
+			func(c FDroidConfig) error {
+				if err := ValidateBaseSourceConfig(c.BaseSourceConfig); err != nil {
+					return err
+				}
+				if strings.TrimSpace(c.AppVersion) == "" {
 					return errors.New("appVersion cannot be empty")
 				}
-				if !appVersionRegexp.MatchString(p.AppVersion) {
-					return fmt.Errorf("appVersion %q is invalid", p.AppVersion)
+				if !appVersionRegexp.MatchString(c.AppVersion) {
+					return fmt.Errorf("appVersion %q is invalid", c.AppVersion)
 				}
 				return nil
 			},

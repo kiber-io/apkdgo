@@ -291,7 +291,7 @@ func TestApplyConfigUsesConfigValues(t *testing.T) {
 		restoreMainState(state)
 	})
 	configFile = writeTestConfig(t, `
-version: 1
+version: 2
 defaults:
   verbose: 2
   force: true
@@ -315,10 +315,9 @@ network:
       RuStore: http://127.0.0.1:8081
 sources:
   rustore:
-    profile:
-      app_version: "1.95.0.1"
-      app_version_code: "1095001"
-      firmware_lang: en
+    app_version: "1.95.0.1"
+    app_version_code: "1095001"
+    firmware_lang: en
     headers:
       user-agent: custom-agent
 `)
@@ -376,19 +375,19 @@ sources:
 	if resolvedCfg.retryPolicy == nil || resolvedCfg.retryPolicy.MaxAttempts != 7 {
 		t.Fatalf("unexpected retry policy: %+v", resolvedCfg.retryPolicy)
 	}
-	if resolvedCfg.sourceHeaders["rustore"]["User-Agent"] != "custom-agent" {
-		t.Fatalf("expected User-Agent source override, got %v", resolvedCfg.sourceHeaders)
+	configAny, configExists := resolvedCfg.sourceConfigs["rustore"]
+	if !configExists {
+		t.Fatalf("expected rustore source config to be decoded")
 	}
-	profileAny, profileExists := resolvedCfg.sourceProfiles["rustore"]
-	if !profileExists {
-		t.Fatalf("expected rustore source profile to be decoded")
-	}
-	profile, ok := profileAny.(sources.RuStoreProfile)
+	config, ok := configAny.(sources.RuStoreConfig)
 	if !ok {
-		t.Fatalf("expected rustore profile type, got %T", profileAny)
+		t.Fatalf("expected rustore config type, got %T", configAny)
 	}
-	if profile.AppVersion != "1.95.0.1" || profile.AppVersionCode != "1095001" || profile.FirmwareLang != "en" {
-		t.Fatalf("unexpected rustore profile values: %+v", profile)
+	if config.Headers["User-Agent"] != "custom-agent" {
+		t.Fatalf("expected User-Agent source override, got %+v", config)
+	}
+	if config.AppVersion != "1.95.0.1" || config.AppVersionCode != "1095001" || config.FirmwareLang != "en" {
+		t.Fatalf("unexpected rustore config values: %+v", config)
 	}
 	if _, ok := resolvedCfg.configuredSourceNames["rustore"]; !ok {
 		t.Fatalf("expected configuredSourceNames to include rustore")
@@ -410,7 +409,7 @@ sources:
 
 	if _, _, err := applyConfig(newConfigApplyCommand(t)); err == nil {
 		t.Fatalf("expected error for unknown rustore profile key")
-	} else if !strings.Contains(err.Error(), "sources.rustore.profile") {
+	} else if !strings.Contains(err.Error(), "sources.rustore") {
 		t.Fatalf("unexpected error text: %v", err)
 	}
 }
@@ -421,11 +420,10 @@ func TestApplyConfigRejectsInvalidProfileValue(t *testing.T) {
 		restoreMainState(state)
 	})
 	configFile = writeTestConfig(t, `
-version: 1
+version: 2
 sources:
   rustore:
-    profile:
-      app_version_code: "abc"
+    app_version_code: "abc"
 `)
 
 	if _, _, err := applyConfig(newConfigApplyCommand(t)); err == nil {

@@ -40,13 +40,14 @@ type NashStore struct {
 	device devices.Device
 }
 
-type NashStoreProfile struct {
-	AppVersion string `yaml:"appVersion"`
-	Token      string `yaml:"token"`
+type NashStoreConfig struct {
+	BaseSourceConfig `yaml:",inline"`
+	AppVersion       string `yaml:"appVersion"`
+	Token            string `yaml:"token"`
 }
 
-func defaultNashStoreProfile() NashStoreProfile {
-	return NashStoreProfile{
+func defaultNashStoreConfig() NashStoreConfig {
+	return NashStoreConfig{
 		AppVersion: "0.0.6",
 	}
 }
@@ -295,37 +296,41 @@ func newNashStoreSource() (Source, error) {
 	if err != nil {
 		return nil, fmt.Errorf("failed to marshal nashstore app header: %w", err)
 	}
-	profile, err := ResolveSourceProfile(s.Name(), defaultNashStoreProfile())
+	config, err := ResolveSourceConfig(s.Name(), defaultNashStoreConfig())
 	if err != nil {
-		return nil, fmt.Errorf("failed to decode nashstore profile: %w", err)
+		return nil, fmt.Errorf("failed to decode nashstore config: %w", err)
 	}
-	if profile.Token != "" {
-		tok = profile.Token
+	if config.Token != "" {
+		tok = config.Token
 	}
-	s.Log().Logd(fmt.Sprintf("Using profile: %+v", profile))
-	headers := network.ApplySourceHeaderOverrides(s.Name(), http.Header{
-		"User-Agent":    {"Nashstore [com.nashstore][" + profile.AppVersion + "][" + cases.Title(language.English).String(s.device.Brand) + "]"},
+	s.Log().Logd(fmt.Sprintf("Using config: %+v", config))
+	headers := ApplyConfiguredHeaders(http.Header{
+		"User-Agent":    {"Nashstore [com.nashstore][" + config.AppVersion + "][" + cases.Title(language.English).String(s.device.Brand) + "]"},
 		"Content-Type":  {"application/json"},
 		"xaccesstoken":  {tok},
 		"Cookie":        {"nashstore_token=" + tok},
 		"nashstore-app": {string(appHeaderBytes)},
-	})
+	}, config.Headers)
 	s.Net = network.DefaultClientForSource(s.Name()).WithDefaultHeaders(headers)
 	return s, nil
 }
 
 func init() {
-	RegisterSourceFactoryWithProfile(newNashStoreSource, "nashstore", NewProfileDecoderWithDefaults(
-		defaultNashStoreProfile(),
-		func(p *NashStoreProfile) {
-			p.AppVersion = strings.TrimSpace(p.AppVersion)
+	RegisterSourceFactoryWithConfig(newNashStoreSource, "nashstore", NewConfigDecoderWithDefaults(
+		defaultNashStoreConfig(),
+		func(c *NashStoreConfig) {
+			NormalizeBaseSourceConfig(&c.BaseSourceConfig)
+			c.AppVersion = strings.TrimSpace(c.AppVersion)
 		},
-		func(p NashStoreProfile) error {
-			if strings.TrimSpace(p.AppVersion) == "" {
+		func(c NashStoreConfig) error {
+			if err := ValidateBaseSourceConfig(c.BaseSourceConfig); err != nil {
+				return err
+			}
+			if strings.TrimSpace(c.AppVersion) == "" {
 				return errors.New("appVersion cannot be empty")
 			}
-			if !appVersionRegexp.MatchString(p.AppVersion) {
-				return fmt.Errorf("appVersion %q is invalid", p.AppVersion)
+			if !appVersionRegexp.MatchString(c.AppVersion) {
+				return fmt.Errorf("appVersion %q is invalid", c.AppVersion)
 			}
 			return nil
 		},

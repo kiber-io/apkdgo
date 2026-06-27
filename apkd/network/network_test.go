@@ -481,36 +481,123 @@ func TestConfigureClientDefaults(t *testing.T) {
 	}
 }
 
-func TestConfigureSourceHeaderOverrides(t *testing.T) {
-	sourceHeadersMu.Lock()
-	oldOverrides := sourceHeaderOverrides
-	sourceHeadersMu.Unlock()
-	t.Cleanup(func() {
-		sourceHeadersMu.Lock()
-		sourceHeaderOverrides = oldOverrides
-		sourceHeadersMu.Unlock()
+func TestClientSetDefaultHeadersClonesInput(t *testing.T) {
+	client := DefaultClient()
+	headers := http.Header{
+		"User-Agent": {"one"},
+	}
+
+	client.SetDefaultHeaders(headers)
+	headers.Set("User-Agent", "two")
+
+	got := client.DefaultHeaders()
+	if got.Get("User-Agent") != "one" {
+		t.Fatalf("expected client headers to be isolated from input mutation, got %q", got.Get("User-Agent"))
+	}
+}
+
+func TestClientUpdateDefaultHeadersMergesValues(t *testing.T) {
+	client := DefaultClient().WithDefaultHeaders(http.Header{
+		"User-Agent": {"one"},
+		"X-Test":     {"a"},
 	})
 
-	if err := ConfigureSourceHeaderOverrides(map[string]map[string]string{
-		"RuStore": {
-			"user-agent": "custom-agent",
-			"deviceId":   "custom-id",
+	client.UpdateDefaultHeaders(http.Header{
+		"User-Agent": {"two"},
+		"X-New":      {"b"},
+	})
+
+	got := client.DefaultHeaders()
+	if got.Get("User-Agent") != "two" {
+		t.Fatalf("expected User-Agent to be updated, got %q", got.Get("User-Agent"))
+	}
+	if got.Get("X-Test") != "a" {
+		t.Fatalf("expected X-Test to be preserved, got %q", got.Get("X-Test"))
+	}
+	if got.Get("X-New") != "b" {
+		t.Fatalf("expected X-New to be added, got %q", got.Get("X-New"))
+	}
+}
+
+func TestDoUsesUpdatedDefaultHeaders(t *testing.T) {
+	var gotUserAgent string
+	client := &Client{
+		doer: doFunc(func(req *http.Request) (*http.Response, error) {
+			gotUserAgent = req.Header.Get("User-Agent")
+			return &http.Response{
+				StatusCode: http.StatusOK,
+				Status:     "200 OK",
+				Header:     http.Header{},
+				Body:       io.NopCloser(strings.NewReader("ok")),
+				Request:    req,
+			}, nil
+		}),
+		retry: &RetryPolice{
+			MaxAttempts: 1,
+			Delay:       0,
+			MaxDelay:    0,
 		},
-	}); err != nil {
-		t.Fatalf("unexpected configure source headers error: %v", err)
 	}
 
-	headers := ApplySourceHeaderOverrides("rustore", http.Header{
-		"User-Agent": {"default-agent"},
-		"X-Test":     {"1"},
+	client.WithDefaultHeaders(http.Header{
+		"User-Agent": {"one"},
 	})
-	if got := headers.Get("User-Agent"); got != "custom-agent" {
-		t.Fatalf("expected overridden User-Agent, got %q", got)
+	client.UpdateDefaultHeaders(http.Header{
+		"User-Agent": {"two"},
+	})
+
+	req, err := http.NewRequestWithContext(context.Background(), http.MethodGet, "https://example.com", http.NoBody)
+	if err != nil {
+		t.Fatalf("unexpected request error: %v", err)
 	}
-	if got := headers.Get("Deviceid"); got != "custom-id" {
-		t.Fatalf("expected configured deviceId, got %q", got)
+	resp, err := client.Do(req)
+	if err != nil {
+		t.Fatalf("unexpected request error: %v", err)
 	}
-	if got := headers.Get("X-Test"); got != "1" {
-		t.Fatalf("expected existing header to be preserved, got %q", got)
+	resp.Body.Close()
+
+	if gotUserAgent != "two" {
+		t.Fatalf("expected updated User-Agent to be sent, got %q", gotUserAgent)
+	}
+}
+
+func TestUpdateDoerDefaultHeaders(t *testing.T) {
+	var doer Doer = DefaultClient().WithDefaultHeaders(http.Header{
+		"User-Agent": {"one"},
+	})
+
+	if err := UpdateDoerDefaultHeaders(doer, http.Header{
+		"User-Agent": {"two"},
+		"X-Test":     {"ok"},
+	}); err != nil {
+		t.Fatalf("unexpected update error: %v", err)
+	}
+
+	configurer, ok := doer.(DefaultHeadersConfigurer)
+	if !ok {
+		t.Fatalf("expected doer to support default headers configuration")
+	}
+	got := configurer.DefaultHeaders()
+	if got.Get("User-Agent") != "two" {
+		t.Fatalf("expected updated User-Agent, got %q", got.Get("User-Agent"))
+	}
+	if got.Get("X-Test") != "ok" {
+		t.Fatalf("expected new X-Test header, got %q", got.Get("X-Test"))
+	}
+}
+
+func TestUpdateDoerDefaultHeadersUnsupported(t *testing.T) {
+	var doer Doer = doFunc(func(req *http.Request) (*http.Response, error) {
+		return &http.Response{
+			StatusCode: http.StatusOK,
+			Status:     "200 OK",
+			Header:     http.Header{},
+			Body:       io.NopCloser(strings.NewReader("ok")),
+			Request:    req,
+		}, nil
+	})
+
+	if err := UpdateDoerDefaultHeaders(doer, http.Header{"User-Agent": {"two"}}); err == nil {
+		t.Fatalf("expected error for unsupported doer")
 	}
 }

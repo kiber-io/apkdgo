@@ -4,83 +4,88 @@ import (
 	"bytes"
 	"errors"
 	"fmt"
+	"net/http"
 	"strings"
 	"sync"
 
 	"gopkg.in/yaml.v3"
 )
 
-type ProfileDecoder func(node *yaml.Node) (any, error)
+type BaseSourceConfig struct {
+	Headers map[string]string `yaml:"headers"`
+}
 
-var sourceProfileDecodersMu sync.RWMutex
-var sourceProfileDecoders = make(map[string]ProfileDecoder)
+type ConfigDecoder func(node *yaml.Node) (any, error)
 
-var configuredSourceProfilesMu sync.RWMutex
-var configuredSourceProfiles = make(map[string]any)
+var sourceConfigDecodersMu sync.RWMutex
+var sourceConfigDecoders = make(map[string]ConfigDecoder)
 
-func RegisterSourceProfileDecoder(sourceName string, decoder ProfileDecoder) error {
+var configuredSourceConfigsMu sync.RWMutex
+var configuredSourceConfigs = make(map[string]any)
+
+func RegisterSourceConfigDecoder(sourceName string, decoder ConfigDecoder) error {
 	normalizedSourceName := normalizeSourceName(sourceName)
 	if normalizedSourceName == "" {
-		return errors.New("source profile decoder name cannot be empty")
+		return errors.New("source config decoder name cannot be empty")
 	}
 	if decoder == nil {
-		return errors.New("source profile decoder cannot be nil")
+		return errors.New("source config decoder cannot be nil")
 	}
 
-	sourceProfileDecodersMu.Lock()
-	defer sourceProfileDecodersMu.Unlock()
-	if _, exists := sourceProfileDecoders[normalizedSourceName]; exists {
-		return fmt.Errorf("source profile decoder for %s is already registered", normalizedSourceName)
+	sourceConfigDecodersMu.Lock()
+	defer sourceConfigDecodersMu.Unlock()
+	if _, exists := sourceConfigDecoders[normalizedSourceName]; exists {
+		return fmt.Errorf("source config decoder for %s is already registered", normalizedSourceName)
 	}
-	sourceProfileDecoders[normalizedSourceName] = decoder
+	sourceConfigDecoders[normalizedSourceName] = decoder
 	return nil
 }
 
-func buildSourceProfileDecoderWithDefaults[T any](
-	defaultProfile T,
+func buildSourceConfigDecoderWithDefaults[T any](
+	defaultConfig T,
 	normalize func(*T),
 	validate func(T) error,
-) ProfileDecoder {
+) ConfigDecoder {
 	return func(node *yaml.Node) (any, error) {
-		profile := defaultProfile
-		if err := DecodeProfileNodeStrict(node, &profile); err != nil {
+		config := defaultConfig
+		if err := DecodeConfigNodeStrict(node, &config); err != nil {
 			return nil, err
 		}
 		if normalize != nil {
-			normalize(&profile)
+			normalize(&config)
 		}
 		if validate != nil {
-			if err := validate(profile); err != nil {
+			if err := validate(config); err != nil {
 				return nil, err
 			}
 		}
-		return profile, nil
+		return config, nil
 	}
 }
 
-func NewProfileDecoderWithDefaults[T any](
-	defaultProfile T,
+func NewConfigDecoderWithDefaults[T any](
+	defaultConfig T,
 	normalize func(*T),
 	validate func(T) error,
-) ProfileDecoder {
-	return buildSourceProfileDecoderWithDefaults(defaultProfile, normalize, validate)
+) ConfigDecoder {
+	return buildSourceConfigDecoderWithDefaults(defaultConfig, normalize, validate)
 }
 
-func RegisterSourceProfileDecoderWithDefaults[T any](
+func RegisterSourceConfigDecoderWithDefaults[T any](
 	sourceName string,
-	defaultProfile T,
+	defaultConfig T,
 	normalize func(*T),
 	validate func(T) error,
 ) error {
-	return RegisterSourceProfileDecoder(sourceName, buildSourceProfileDecoderWithDefaults(defaultProfile, normalize, validate))
+	return RegisterSourceConfigDecoder(sourceName, buildSourceConfigDecoderWithDefaults(defaultConfig, normalize, validate))
 }
 
-// ErrNoProfile is returned when a source has no profile configured.
-var ErrNoProfile = errors.New("no profile configured")
+// ErrNoConfig is returned when a source has no config configured.
+var ErrNoConfig = errors.New("no config configured")
 
-func DecodeSourceProfile(sourceName string, node *yaml.Node) (any, error) {
+func DecodeSourceConfig(sourceName string, node *yaml.Node) (any, error) {
 	if node == nil || node.Kind == 0 || node.Tag == "!!null" {
-		return nil, ErrNoProfile
+		return nil, ErrNoConfig
 	}
 
 	normalizedSourceName := normalizeSourceName(sourceName)
@@ -88,78 +93,119 @@ func DecodeSourceProfile(sourceName string, node *yaml.Node) (any, error) {
 		return nil, errors.New("source name cannot be empty")
 	}
 
-	sourceProfileDecodersMu.RLock()
-	decoder, exists := sourceProfileDecoders[normalizedSourceName]
-	sourceProfileDecodersMu.RUnlock()
+	sourceConfigDecodersMu.RLock()
+	decoder, exists := sourceConfigDecoders[normalizedSourceName]
+	sourceConfigDecodersMu.RUnlock()
 	if !exists {
-		return nil, fmt.Errorf("source %s does not support profile settings", normalizedSourceName)
+		return nil, fmt.Errorf("source %s does not support config settings", normalizedSourceName)
 	}
 
-	profile, err := decoder(node)
+	config, err := decoder(node)
 	if err != nil {
 		return nil, err
 	}
-	return profile, nil
+	return config, nil
 }
 
-func ConfigureSourceProfiles(sourceProfiles map[string]any) {
-	normalizedProfiles := make(map[string]any, len(sourceProfiles))
-	for sourceName, profile := range sourceProfiles {
+func ConfigureSourceConfigs(sourceConfigs map[string]any) {
+	normalizedConfigs := make(map[string]any, len(sourceConfigs))
+	for sourceName, config := range sourceConfigs {
 		normalizedSourceName := normalizeSourceName(sourceName)
 		if normalizedSourceName == "" {
 			continue
 		}
-		normalizedProfiles[normalizedSourceName] = profile
+		normalizedConfigs[normalizedSourceName] = config
 	}
 
-	configuredSourceProfilesMu.Lock()
-	configuredSourceProfiles = normalizedProfiles
-	configuredSourceProfilesMu.Unlock()
+	configuredSourceConfigsMu.Lock()
+	configuredSourceConfigs = normalizedConfigs
+	configuredSourceConfigsMu.Unlock()
 }
 
-func GetConfiguredSourceProfile(sourceName string) (any, bool) {
+func GetConfiguredSourceConfig(sourceName string) (any, bool) {
 	normalizedSourceName := normalizeSourceName(sourceName)
-	configuredSourceProfilesMu.RLock()
-	defer configuredSourceProfilesMu.RUnlock()
-	profile, exists := configuredSourceProfiles[normalizedSourceName]
-	return profile, exists
+	configuredSourceConfigsMu.RLock()
+	defer configuredSourceConfigsMu.RUnlock()
+	config, exists := configuredSourceConfigs[normalizedSourceName]
+	return config, exists
 }
 
-func ResolveSourceProfile[T any](sourceName string, defaultProfile T) (T, error) {
+func ResolveSourceConfig[T any](sourceName string, defaultConfig T) (T, error) {
 	normalizedSourceName := normalizeSourceName(sourceName)
-	profile, exists := GetConfiguredSourceProfile(normalizedSourceName)
+	config, exists := GetConfiguredSourceConfig(normalizedSourceName)
 	if !exists {
-		return defaultProfile, nil
+		return defaultConfig, nil
 	}
-	typedProfile, ok := profile.(T)
+	typedConfig, ok := config.(T)
 	if !ok {
 		var zero T
-		return zero, fmt.Errorf("invalid runtime profile type for source %s: %T", normalizedSourceName, profile)
+		return zero, fmt.Errorf("invalid runtime config type for source %s: %T", normalizedSourceName, config)
 	}
-	return typedProfile, nil
+	return typedConfig, nil
 }
 
 func normalizeSourceName(sourceName string) string {
 	return strings.ToLower(strings.TrimSpace(sourceName))
 }
 
-func DecodeProfileNodeStrict(node *yaml.Node, out any) error {
+func DecodeConfigNodeStrict(node *yaml.Node, out any) error {
 	if node == nil {
-		return errors.New("profile node cannot be nil")
+		return errors.New("config node cannot be nil")
 	}
-	var profileYAML bytes.Buffer
-	encoder := yaml.NewEncoder(&profileYAML)
+	var configYAML bytes.Buffer
+	encoder := yaml.NewEncoder(&configYAML)
 	if err := encoder.Encode(node); err != nil {
-		return fmt.Errorf("failed to encode profile YAML: %w", err)
+		return fmt.Errorf("failed to encode config YAML: %w", err)
 	}
 	if err := encoder.Close(); err != nil {
 		return fmt.Errorf("failed to close YAML encoder: %w", err)
 	}
 
-	decoder := yaml.NewDecoder(&profileYAML)
+	decoder := yaml.NewDecoder(&configYAML)
 	decoder.KnownFields(true)
 	if err := decoder.Decode(out); err != nil {
-		return fmt.Errorf("failed to decode profile: %w", err)
+		return fmt.Errorf("failed to decode config: %w", err)
 	}
 	return nil
+}
+
+func NormalizeBaseSourceConfig(config *BaseSourceConfig) {
+	if config == nil || len(config.Headers) == 0 {
+		return
+	}
+	normalizedHeaders := make(map[string]string, len(config.Headers))
+	for headerName, headerValue := range config.Headers {
+		normalizedHeaderName := http.CanonicalHeaderKey(strings.TrimSpace(headerName))
+		normalizedHeaders[normalizedHeaderName] = strings.TrimSpace(headerValue)
+	}
+	config.Headers = normalizedHeaders
+}
+
+func ValidateBaseSourceConfig(config BaseSourceConfig) error {
+	for headerName := range config.Headers {
+		if strings.TrimSpace(headerName) == "" {
+			return errors.New("headers contains an empty header name")
+		}
+	}
+	return nil
+}
+
+func ApplyConfiguredHeaders(baseHeaders http.Header, configuredHeaders map[string]string) http.Header {
+	resolvedHeaders := cloneHTTPHeaders(baseHeaders)
+	for headerName, headerValue := range configuredHeaders {
+		resolvedHeaders.Set(headerName, headerValue)
+	}
+	return resolvedHeaders
+}
+
+func cloneHTTPHeaders(headers http.Header) http.Header {
+	if headers == nil {
+		return http.Header{}
+	}
+	cloned := make(http.Header, len(headers))
+	for headerName, values := range headers {
+		canonicalHeaderName := http.CanonicalHeaderKey(headerName)
+		cloned[canonicalHeaderName] = append(cloned[canonicalHeaderName], values...)
+	}
+	return cloned
 }

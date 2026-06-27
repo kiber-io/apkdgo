@@ -20,6 +20,10 @@ type ApkCombo struct {
 	BaseSource
 }
 
+type ApkComboConfig struct {
+	BaseSourceConfig `yaml:",inline"`
+}
+
 func (s *ApkCombo) fetchDocument(url string) (*goquery.Document, *neturl.URL, error) {
 	req, err := s.NewRequest("GET", url, nil)
 	if err != nil {
@@ -294,15 +298,27 @@ func newApkComboSource() (Source, error) {
 	if err != nil {
 		return nil, fmt.Errorf("failed to create fake user agent: %w", err)
 	}
+	config, err := ResolveSourceConfig(s.Name(), ApkComboConfig{})
+	if err != nil {
+		return nil, fmt.Errorf("failed to decode apkcombo config: %w", err)
+	}
 	randomUA := ua.Filter().Platform(fakeUserAgent.Desktop).Browser(fakeUserAgent.Firefox, fakeUserAgent.Chrome).Get()
 	s.Log().Logd("Using User-Agent: " + randomUA)
-	headers := network.ApplySourceHeaderOverrides(s.Name(), http.Header{
+	headers := ApplyConfiguredHeaders(http.Header{
 		"User-Agent": {randomUA},
-	})
+	}, config.Headers)
 	s.Net = network.DefaultClientForSource(s.Name()).WithDefaultHeaders(headers)
 	return s, nil
 }
 
 func init() {
-	RegisterSourceFactory(newApkComboSource)
+	RegisterSourceFactoryWithConfig(newApkComboSource, "apkcombo", NewConfigDecoderWithDefaults(
+		ApkComboConfig{},
+		func(c *ApkComboConfig) {
+			NormalizeBaseSourceConfig(&c.BaseSourceConfig)
+		},
+		func(c ApkComboConfig) error {
+			return ValidateBaseSourceConfig(c.BaseSourceConfig)
+		},
+	))
 }
