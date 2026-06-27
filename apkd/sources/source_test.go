@@ -7,8 +7,12 @@ import (
 	"errors"
 	"io"
 	"net/http"
+	"os"
 	"strings"
 	"testing"
+	"time"
+
+	"github.com/kiber-io/apkd/apkd/network"
 )
 
 type stubSource struct {
@@ -235,4 +239,28 @@ func TestCreateResponseReaderNon200CloseError(t *testing.T) {
 	if !body.closed {
 		t.Fatalf("expected response body close to be attempted")
 	}
+}
+
+// setupTestProxy reads APKD_TEST_PROXY and configures it as a global proxy.
+// Returns true if a proxy was configured. Resets on test cleanup.
+func setupTestProxy(t *testing.T) bool {
+	t.Helper()
+	proxy := os.Getenv("APKD_TEST_PROXY")
+	if proxy == "" {
+		return false
+	}
+	if err := network.ConfigureProxies(proxy, nil, true); err != nil {
+		t.Fatalf("failed to configure test proxy %q: %v", proxy, err)
+	}
+	t.Cleanup(func() { _ = network.ConfigureProxies("", nil, false) }) // restore: no proxy, verify SSL
+	return true
+}
+
+// setClientTimeout overrides the global HTTP client timeout for the duration of the test.
+func setClientTimeout(t *testing.T, d time.Duration) {
+	t.Helper()
+	if err := network.ConfigureClientDefaults(&d, nil); err != nil {
+		t.Fatalf("failed to set client timeout: %v", err)
+	}
+	t.Cleanup(network.ResetClientDefaults)
 }

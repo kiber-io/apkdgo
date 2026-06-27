@@ -2,6 +2,7 @@ package sources
 
 import (
 	"archive/zip"
+	"errors"
 	"io"
 	"net/http"
 	"os"
@@ -11,6 +12,7 @@ import (
 	"sync"
 	"testing"
 
+	"github.com/kiber-io/apkd/apkd/devices"
 	"gopkg.in/yaml.v3"
 )
 
@@ -256,4 +258,215 @@ func TestRuStoreGetAppInfoConcurrentCacheAccess(t *testing.T) {
 	if cacheLen != 1 {
 		t.Fatalf("expected cache size 1, got %d", cacheLen)
 	}
+}
+
+const (
+	ruStoreOKAppInfo      = `{"code":"OK","body":{"appId":1,"fileSize":123456,"versionName":"1.0.0","versionCode":100,"publicCompanyId":"dev123"}}`
+	ruStoreOKDownloadLink = `{"code":"OK","body":{"downloadUrls":[{"url":"https://cdn.example.com/app.apk"}]}}`
+	ruStoreOKDevApps      = `{"code":"OK","body":{"elements":[{"packageName":"com.app.one"},{"packageName":"com.app.two"}]}}`
+)
+
+func mockRuStore(doer doerFunc) *RuStore {
+	s := &RuStore{appsCache: make(map[string]map[string]any)}
+	s.Source = s
+	s.config = defaultRuStoreConfig()
+	s.Net = doer
+	return s
+}
+
+func okResp(req *http.Request, body string) *http.Response {
+	return &http.Response{StatusCode: http.StatusOK, Header: http.Header{}, Body: io.NopCloser(strings.NewReader(body)), Request: req}
+}
+
+func statusResp(req *http.Request, code int) *http.Response {
+	return &http.Response{StatusCode: code, Status: http.StatusText(code), Header: http.Header{}, Body: io.NopCloser(strings.NewReader("")), Request: req}
+}
+
+func TestRuStoreGetAppInfoCacheHit(t *testing.T) {
+	calls := 0
+	s := &RuStore{appsCache: map[string]map[string]any{"com.cached": {"appId": 1.0}}}
+	s.Source = s
+	s.Net = doerFunc(func(req *http.Request) (*http.Response, error) {
+		calls++
+		return okResp(req, "{}"), nil
+	})
+	if _, err := s.getAppInfo("com.cached"); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if calls != 0 {
+		t.Fatalf("expected 0 HTTP calls for cached entry, got %d", calls)
+	}
+}
+
+func TestRuStoreGetAppInfoNotFound(t *testing.T) {
+	s := mockRuStore(func(req *http.Request) (*http.Response, error) {
+		return statusResp(req, http.StatusNotFound), nil
+	})
+	_, err := s.getAppInfo("com.missing")
+	var notFound *AppNotFoundError
+	if !errors.As(err, &notFound) {
+		t.Fatalf("expected AppNotFoundError, got %T: %v", err, err)
+	}
+}
+
+func TestRuStoreGetAppInfoNon200(t *testing.T) {
+	s := mockRuStore(func(req *http.Request) (*http.Response, error) {
+		return statusResp(req, http.StatusInternalServerError), nil
+	})
+	if _, err := s.getAppInfo("com.example"); err == nil {
+		t.Fatal("expected error for non-200 response")
+	}
+}
+
+func TestRuStoreGetAppInfoInvalidJSON(t *testing.T) {
+	s := mockRuStore(func(req *http.Request) (*http.Response, error) {
+		return okResp(req, "not json"), nil
+	})
+	if _, err := s.getAppInfo("com.example"); err == nil {
+		t.Fatal("expected error for invalid JSON")
+	}
+}
+
+func TestRuStoreGetAppInfoCodeNotOK(t *testing.T) {
+	s := mockRuStore(func(req *http.Request) (*http.Response, error) {
+		return okResp(req, `{"code":"ERROR","message":"not found"}`), nil
+	})
+	_, err := s.getAppInfo("com.example")
+	var notFound *AppNotFoundError
+	if !errors.As(err, &notFound) {
+		t.Fatalf("expected AppNotFoundError for code!=OK, got %T: %v", err, err)
+	}
+}
+
+func TestRuStoreFindByPackageHappyPath(t *testing.T) {
+	s := mockRuStore(func(req *http.Request) (*http.Response, error) {
+		return okResp(req, ruStoreOKAppInfo), nil
+	})
+	v, err := s.FindByPackage("com.example", 0)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if v.Name != "1.0.0" || v.Code != 100 || v.Size != 123456 || v.DeveloperId != "dev123" || v.Type != APK {
+		t.Fatalf("unexpected version: %+v", v)
+	}
+}
+
+func TestRuStoreFindByPackageVersionCodeMismatch(t *testing.T) {
+	s := mockRuStore(func(req *http.Request) (*http.Response, error) {
+		return okResp(req, ruStoreOKAppInfo), nil
+	})
+	_, err := s.FindByPackage("com.example", 999)
+	var notFound *AppNotFoundError
+	if !errors.As(err, &notFound) {
+		t.Fatalf("expected AppNotFoundError for version code mismatch, got %T: %v", err, err)
+	}
+}
+
+func TestRuStoreGetDownloadLinkHappyPath(t *testing.T) {
+	s := mockRuStore(func(req *http.Request) (*http.Response, error) {
+		return okResp(req, ruStoreOKDownloadLink), nil
+	})
+	link, err := s.getDownloadLink(1)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if link != "https://cdn.example.com/app.apk" {
+		t.Fatalf("unexpected download link: %q", link)
+	}
+}
+
+func TestRuStoreGetDownloadLinkNotFound(t *testing.T) {
+	s := mockRuStore(func(req *http.Request) (*http.Response, error) {
+		return statusResp(req, http.StatusNotFound), nil
+	})
+	_, err := s.getDownloadLink(1)
+	var notFound *AppNotFoundError
+	if !errors.As(err, &notFound) {
+		t.Fatalf("expected AppNotFoundError for 404, got %T: %v", err, err)
+	}
+}
+
+func TestRuStoreFindByDeveloperHappyPath(t *testing.T) {
+	s := mockRuStore(func(req *http.Request) (*http.Response, error) {
+		return okResp(req, ruStoreOKDevApps), nil
+	})
+	pkgs, err := s.FindByDeveloper("dev123")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(pkgs) != 2 || pkgs[0] != "com.app.one" || pkgs[1] != "com.app.two" {
+		t.Fatalf("unexpected packages: %v", pkgs)
+	}
+}
+
+func TestRuStoreFindByDeveloperNotFound(t *testing.T) {
+	s := mockRuStore(func(req *http.Request) (*http.Response, error) {
+		return statusResp(req, http.StatusNotFound), nil
+	})
+	_, err := s.FindByDeveloper("nobody")
+	var notFound *AppNotFoundError
+	if !errors.As(err, &notFound) {
+		t.Fatalf("expected AppNotFoundError for 404, got %T: %v", err, err)
+	}
+}
+
+func TestRuStoreGetLatestVersionParsesResponse(t *testing.T) {
+	const body = `{"body":{"latestVersion":"1103100","latestVersionName":"1.103.1.0"}}`
+	s := mockRuStore(func(req *http.Request) (*http.Response, error) {
+		return okResp(req, body), nil
+	})
+	update, err := s.getLatestRustoreVersion()
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if update.Body.LatestVersionCode != "1103100" || update.Body.LatestVersionName != "1.103.1.0" {
+		t.Fatalf("unexpected update: %+v", update.Body)
+	}
+}
+
+func TestBuildUserAgent(t *testing.T) {
+	device := devices.Device{
+		AndroidVersion: "12",
+		SDKInt:         31,
+		CPUAbis:        []string{"arm64-v8a"},
+		Manufacturer:   "Google",
+		Model:          "Pixel 6",
+	}
+	ua := buildUserAgent("1.103.1.0", device)
+	for _, want := range []string{"RuStore/1.103.1.0", "Android 12", "SDK 31", "arm64-v8a", "Google", "Pixel 6"} {
+		if !strings.Contains(ua, want) {
+			t.Fatalf("expected %q in user agent %q", want, ua)
+		}
+	}
+}
+
+func TestRuStoreIntegration(t *testing.T) {
+	if testing.Short() {
+		t.Skip("skipping network integration test")
+	}
+	setupTestProxy(t)
+	src, err := newRuStoreSource()
+	if err != nil {
+		t.Fatalf("failed to create source: %v", err)
+	}
+	v, err := src.FindByPackage("com.vkontakte.android", 0)
+	if err != nil {
+		t.Fatalf("FindByPackage: %v", err)
+	}
+	if v.Code == 0 || v.Name == "" {
+		t.Fatalf("expected non-empty version, got %+v", v)
+	}
+	t.Logf("version: %s (%d), size: %d", v.Name, v.Code, v.Size)
+
+	stream, err := src.Download(v)
+	if err != nil {
+		t.Fatalf("Download: %v", err)
+	}
+	defer stream.Body.Close()
+	buf := make([]byte, 32)
+	n, _ := stream.Body.Read(buf)
+	if n < 4 || buf[0] != 'P' || buf[1] != 'K' {
+		t.Fatalf("expected APK/ZIP magic (PK), got first %d bytes: %q", n, buf[:n])
+	}
+	t.Logf("download started OK, first %d bytes received", n)
 }

@@ -2,9 +2,11 @@ package sources
 
 import (
 	"errors"
+	"io"
 	"net/http"
 	"strings"
 	"testing"
+	"time"
 )
 
 func testFDroidData() map[string]any {
@@ -185,4 +187,80 @@ func TestFDroidGetJsonClosesBodyOnNon200(t *testing.T) {
 	if !body.closed {
 		t.Fatalf("expected response body to be closed on non-200 response")
 	}
+}
+
+func TestFDroidGetJsonCachesResult(t *testing.T) {
+	calls := 0
+	const body = `{"packages":{"com.example":{"metadata":{},"versions":{}}}}`
+	s := &FDroid{}
+	s.Source = s
+	s.config = defaultFDroidConfig()
+	s.Net = doerFunc(func(req *http.Request) (*http.Response, error) {
+		calls++
+		return &http.Response{StatusCode: http.StatusOK, Header: http.Header{}, Body: io.NopCloser(strings.NewReader(body)), Request: req}, nil
+	})
+
+	if _, err := s.getJson(); err != nil {
+		t.Fatalf("first getJson error: %v", err)
+	}
+	if _, err := s.getJson(); err != nil {
+		t.Fatalf("second getJson error: %v", err)
+	}
+	if calls != 1 {
+		t.Fatalf("expected exactly 1 HTTP call, got %d", calls)
+	}
+}
+
+func TestFDroidDownloadConstructsURL(t *testing.T) {
+	const customBase = "https://custom.fdroid.example"
+	const link = "/com.example_10.apk"
+	var capturedURL string
+	s := &FDroid{}
+	s.Source = s
+	s.config = FDroidConfig{BaseSourceConfig: BaseSourceConfig{BaseURL: customBase}, AppVersion: "1.0"}
+	s.Net = doerFunc(func(req *http.Request) (*http.Response, error) {
+		capturedURL = req.URL.String()
+		return &http.Response{StatusCode: http.StatusOK, Header: http.Header{}, Body: io.NopCloser(strings.NewReader("data")), ContentLength: 4, Request: req}, nil
+	})
+
+	stream, err := s.Download(Version{Link: link})
+	if err != nil {
+		t.Fatalf("unexpected download error: %v", err)
+	}
+	defer stream.Body.Close()
+	if capturedURL != customBase+"/repo"+link {
+		t.Fatalf("expected URL %q, got %q", customBase+"/repo"+link, capturedURL)
+	}
+}
+
+func TestFDroidIntegration(t *testing.T) {
+	if testing.Short() {
+		t.Skip("skipping network integration test")
+	}
+	setupTestProxy(t)
+	setClientTimeout(t, 90*time.Second) // index-v2.json is ~30MB, 30s default isn't enough
+	src, err := newFDroidSource()
+	if err != nil {
+		t.Fatalf("failed to create source: %v", err)
+	}
+	v, err := src.FindByPackage("org.fdroid.fdroid", 0)
+	if err != nil {
+		t.Fatalf("FindByPackage: %v", err)
+	}
+	if v.Code == 0 || v.Name == "" || v.Link == "" {
+		t.Fatalf("expected non-empty version, got %+v", v)
+	}
+	t.Logf("version: %s (%d), size: %d", v.Name, v.Code, v.Size)
+
+	stream, err := src.Download(v)
+	if err != nil {
+		t.Fatalf("Download: %v", err)
+	}
+	defer stream.Body.Close()
+	buf := make([]byte, 32)
+	n, _ := stream.Body.Read(buf)
+	if n < 4 || buf[0] != 'P' || buf[1] != 'K' {
+		t.Fatalf("expected APK/ZIP magic (PK), got first %d bytes: %q", n, buf[:n])
+	}
+	t.Logf("download started OK, first %d bytes received", n)
 }
