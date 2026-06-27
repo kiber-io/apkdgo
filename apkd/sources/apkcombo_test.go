@@ -3,6 +3,7 @@ package sources
 import (
 	"io"
 	"net/http"
+	"os"
 	"strings"
 	"testing"
 )
@@ -107,6 +108,9 @@ func TestApkComboCheckinUsesBaseURL(t *testing.T) {
 func TestApkComboIntegration(t *testing.T) {
 	if testing.Short() {
 		t.Skip("skipping network integration test")
+	}
+	if os.Getenv("APKD_TEST_APKCOMBO") == "" {
+		t.Skip("skipping: set APKD_TEST_APKCOMBO=1 to enable (web scraping, may be flaky in CI)")
 	}
 	setupTestProxy(t)
 	src, err := newApkComboSource()
