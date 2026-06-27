@@ -43,7 +43,7 @@ jobs:
 
     - name: Test (linux/amd64 only)
       if: ${{ matrix.os == 'linux' && matrix.arch == 'amd64' }}
-      run: go test -v ./apkd
+      run: go test -v -timeout 10m ./apkd/...
 
     - name: Build
       shell: bash
