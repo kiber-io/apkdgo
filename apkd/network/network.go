@@ -301,6 +301,18 @@ func (c *Client) UpdateDefaultHeaders(headers http.Header) *Client {
 	return c
 }
 
+func (c *Client) DisableHTTP2() *Client {
+	if base, ok := c.doer.(*http.Client); ok {
+		if t, ok := base.Transport.(*http.Transport); ok {
+			t.ForceAttemptHTTP2 = false
+			t.TLSClientConfig.NextProtos = []string{"http/1.1"}
+			t.TLSNextProto = make(map[string]func(string, *tls.Conn) http.RoundTripper)
+			t.TLSHandshakeTimeout = 10 * time.Second
+		}
+	}
+	return c
+}
+
 func (c *Client) DefaultHeaders() http.Header {
 	c.defaultMu.RLock()
 	defer c.defaultMu.RUnlock()
