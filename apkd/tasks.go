@@ -419,6 +419,10 @@ func (tq *TaskQueue) findVersion(packageName string, versionCode int) (sources.V
 				}
 				return
 			}
+			if onlyApk && version.Type != sources.APK {
+				logger.Logd(fmt.Sprintf("Skipping package %s v%s at source %s: type %s (--only-apk)", packageName, version.Name, src.Name(), version.Type))
+				return
+			}
 			mu.Lock()
 			logger.Logd(fmt.Sprintf("Found package %s v%s (%v) at source %s", packageName, version.Name, version.Code, src.Name()))
 			if version.Code > latestVersion.Code {

@@ -36,6 +36,7 @@ var verbosity int
 var listSources bool
 var printVersion bool
 var workers int
+var onlyApk bool
 
 var selectedSources []string
 var activeSources []sources.Source
@@ -373,6 +374,13 @@ func applyConfig(cmd *cobra.Command) (*resolvedConfig, []string, error) {
 		}
 		resolved.retryPolicy = retryPolicy
 	}
+	if cfg.Defaults.OnlyApk != nil {
+		if cmd.Flags().Changed("only-apk") {
+			recordOverride("CLI flag --only-apk overrides config value defaults.only_apk")
+		} else {
+			onlyApk = *cfg.Defaults.OnlyApk
+		}
+	}
 	for sourceName, sourceCfg := range cfg.Sources {
 		resolved.configuredSourceNames[sourceName] = struct{}{}
 		sourceConfig, err := sources.DecodeSourceConfig(sourceName, sourceCfg.Node)
@@ -521,6 +529,7 @@ func main() {
 	rootCmd.PersistentFlags().CountVarP(&verbosity, "verbose", "v", "set verbosity level. Use -v or -vv for more verbosity")
 	rootCmd.PersistentFlags().BoolVarP(&listSources, "list-sources", "l", false, "list available sources")
 	rootCmd.PersistentFlags().BoolVarP(&printVersion, "version", "V", false, "print version and exit")
+	rootCmd.PersistentFlags().BoolVarP(&onlyApk, "only-apk", "", valueOrZero(builtInDefaultConfig.Defaults.OnlyApk), "download only APK files, skip other types (e.g. XAPK, APKs)")
 
 	if err := rootCmd.Execute(); err != nil {
 		fmt.Fprintln(os.Stderr, err)

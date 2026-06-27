@@ -68,6 +68,7 @@ type ConfigDefaults struct {
 	Force     *bool    `yaml:"force"`
 	Dev       *bool    `yaml:"dev"`
 	Verbose   *int     `yaml:"verbose"`
+	OnlyApk   *bool    `yaml:"only_apk"`
 }
 
 type ConfigRuntime struct {
