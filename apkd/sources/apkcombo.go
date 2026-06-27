@@ -4,11 +4,13 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"math/rand"
 	"net/http"
 	neturl "net/url"
 	"path"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/kiber-io/apkd/apkd/network"
 	fakeUserAgent "github.com/lib4u/fake-useragent"
@@ -184,7 +186,10 @@ func (s *ApkCombo) resolveVersionCode(versionUrl string) (apkComboVersionItem, e
 	}
 	variantBlock := doc.Find("#variants-tab .variant")
 	if variantBlock.Length() == 0 {
-		return apkComboVersionItem{}, fmt.Errorf("no variants found for version URL %s", versionUrl)
+		variantBlock = doc.Find("#best-variant-tab .variant")
+		if variantBlock.Length() == 0 {
+			return apkComboVersionItem{}, fmt.Errorf("no variants found for version URL %s", versionUrl)
+		}
 	}
 	versionCandidate, err := s.parseVersionItem(variantBlock)
 	if err != nil {
@@ -193,8 +198,13 @@ func (s *ApkCombo) resolveVersionCode(versionUrl string) (apkComboVersionItem, e
 	return versionCandidate, nil
 }
 
-func (s *ApkCombo) tryToFindOldVersion(url string, versionCode int) (apkComboVersionItem, error) {
-	doc, _, err := s.fetchDocument(url)
+func sleepWithJitter(base time.Duration, maxJitter time.Duration) {
+	jitter := time.Duration(rand.Int63n(int64(maxJitter)))
+	time.Sleep(base + jitter)
+}
+
+func (s *ApkCombo) tryToFindOldVersion(link string, versionCode int) (apkComboVersionItem, error) {
+	doc, _, err := s.fetchDocument(link)
 	if err != nil {
 		return apkComboVersionItem{}, err
 	}
@@ -214,6 +224,7 @@ func (s *ApkCombo) tryToFindOldVersion(url string, versionCode int) (apkComboVer
 			s.Log().Logw(fmt.Sprintf("Failed to join version link path: %v", err))
 			return true
 		}
+		sleepWithJitter(200*time.Millisecond, 200*time.Millisecond)
 		versionItem, err := s.resolveVersionCode(versionLink)
 		if err != nil {
 			s.Log().Logw(fmt.Sprintf("Failed to parse version item: %v", err))
@@ -226,6 +237,23 @@ func (s *ApkCombo) tryToFindOldVersion(url string, versionCode int) (apkComboVer
 		return false
 	})
 	if foundVersion.VersionCode == 0 {
+		lastBtn := doc.Find(".pagination .buttons .button:last-child")
+		_, disabled := lastBtn.Attr("disabled")
+		if !disabled {
+			href, exists := lastBtn.Attr("href")
+			if !exists {
+				s.Log().Logw("Last pagination button missing href attribute")
+			} else {
+				base, _ := neturl.Parse(s.baseURL)
+				ref, err := neturl.Parse(href)
+				if err != nil {
+					s.Log().Logw(fmt.Sprintf("Failed to parse next page URL: %v", err))
+				} else {
+					sleepWithJitter(200*time.Millisecond, 200*time.Millisecond)
+					return s.tryToFindOldVersion(base.ResolveReference(ref).String(), versionCode)
+				}
+			}
+		}
 		return apkComboVersionItem{}, fmt.Errorf("version code %d not found", versionCode)
 	}
 	return foundVersion, nil
@@ -289,7 +317,6 @@ func (s *ApkCombo) FindByPackage(packageName string, versionCode int) (Version, 
 	}
 	version.DeveloperId = authorName
 
-	// var downloadPageUrl string
 	var versionItem apkComboVersionItem
 	if versionCode != 0 {
 		oldVersionUrl, err := neturl.JoinPath(packagePageUrl, "old-versions")
