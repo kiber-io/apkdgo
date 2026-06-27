@@ -23,10 +23,21 @@ import (
 
 type RuStore struct {
 	BaseSource
-	appsCache   map[string]map[string]any
-	appsCacheMu sync.RWMutex
-	device      devices.Device
-	config      RuStoreConfig
+	appsCache                 map[string]map[string]any
+	appsCacheMu               sync.RWMutex
+	device                    devices.Device
+	config                    RuStoreConfig
+	latestVersionOnce         sync.Once
+	latestVersionCheckEnabled bool
+}
+
+type RuStoreUpdateBody struct {
+	LatestVersionCode string `json:"latestVersion"`
+	LatestVersionName string `json:"latestVersionName"`
+}
+
+type RuStoreUpdate struct {
+	Body RuStoreUpdateBody `json:"body"`
 }
 
 type RuStoreConfig struct {
@@ -49,6 +60,67 @@ func defaultRuStoreConfig() RuStoreConfig {
 		AppVersionCode: "1103100",
 		FirmwareLang:   "ru",
 	}
+}
+
+func (s *RuStore) ensureLatestVersion() {
+	if !s.latestVersionCheckEnabled {
+		return
+	}
+	s.latestVersionOnce.Do(func() {
+		rustoreUpdate, err := s.getLatestRustoreVersion()
+		if err != nil {
+			s.Log().Logw(fmt.Sprintf("Failed to get latest RuStore version: %v, using hardcoded default values. They may be outdated. Please update your profile or report an issue.", err))
+			return
+		}
+		s.Log().Logd(fmt.Sprintf("Latest RuStore version: %s (code: %s)", rustoreUpdate.Body.LatestVersionName, rustoreUpdate.Body.LatestVersionCode))
+
+		headersToUpdate := make(http.Header)
+		if _, exists := s.config.Headers[http.CanonicalHeaderKey("ruStoreVerCode")]; !exists {
+			headersToUpdate.Set("ruStoreVerCode", rustoreUpdate.Body.LatestVersionCode)
+		}
+		if _, exists := s.config.Headers[http.CanonicalHeaderKey("User-Agent")]; !exists {
+			headersToUpdate.Set("User-Agent", buildUserAgent(rustoreUpdate.Body.LatestVersionName, s.device))
+		}
+		if len(headersToUpdate) == 0 {
+			return
+		}
+		if err := network.UpdateDoerDefaultHeaders(s.Net, headersToUpdate); err != nil {
+			s.Log().Logw(fmt.Sprintf("Failed to update default headers with latest RuStore version: %v", err))
+		}
+	})
+}
+
+func (s *RuStore) getLatestRustoreVersion() (RuStoreUpdate, error) {
+	url := "https://backapi.rustore.ru/rustore-info/new-version"
+	req, err := s.NewRequest("GET", url, nil)
+	if err != nil {
+		return RuStoreUpdate{}, err
+	}
+
+	res, err := s.Http().Do(req)
+	if err != nil {
+		return RuStoreUpdate{}, fmt.Errorf("failed to fetch latest RuStore version: %w", err)
+	}
+
+	defer res.Body.Close()
+	body, err := readBody(res)
+	if err != nil {
+		return RuStoreUpdate{}, err
+	}
+	if res.StatusCode != http.StatusOK {
+		return RuStoreUpdate{}, fmt.Errorf("failed to get latest RuStore version (%d): %s", res.StatusCode, body)
+	}
+
+	var rustoreUpdate RuStoreUpdate
+	if err := json.Unmarshal(body, &rustoreUpdate); err != nil {
+		return RuStoreUpdate{}, fmt.Errorf("failed to parse latest RuStore version response: %w", err)
+	}
+
+	if rustoreUpdate.Body.LatestVersionCode == "" {
+		return RuStoreUpdate{}, fmt.Errorf("latestVersion not found in latest RuStore version response")
+	}
+
+	return rustoreUpdate, nil
 }
 
 func (s *RuStore) Download(version Version) (*DownloadStream, error) {
@@ -104,6 +176,7 @@ func (s *RuStore) generateDeviceId() string {
 }
 
 func (s *RuStore) getAppInfo(packageName string) (map[string]any, error) {
+	s.ensureLatestVersion()
 	s.appsCacheMu.RLock()
 	appInfo, ok := s.appsCache[packageName]
 	s.appsCacheMu.RUnlock()
@@ -161,6 +234,7 @@ func (s *RuStore) getAppInfo(packageName string) (map[string]any, error) {
 }
 
 func (s *RuStore) getDownloadLink(appId float64) (string, error) {
+	s.ensureLatestVersion()
 	url := "https://backapi.rustore.ru/applicationData/v2/download-link"
 	payloadData := map[string]any{
 		"appId":                appId,
@@ -276,6 +350,7 @@ func (s *RuStore) MaxParallelsDownloads() int {
 }
 
 func (s *RuStore) FindByDeveloper(developerId string) ([]string, error) {
+	s.ensureLatestVersion()
 	url := "https://backapi.rustore.ru/applicationData/devs/" + developerId + "/apps?limit=1000"
 	req, err := s.NewRequest("GET", url, nil)
 	if err != nil {
@@ -553,6 +628,7 @@ func newRuStoreSource() (Source, error) {
 	s.config = config
 	s.Log().Logd(fmt.Sprintf("Initialized with device: %s %s (Android %s, SDK %d)", s.device.Brand, s.device.Model, s.device.AndroidVersion, s.device.SDKInt))
 	s.Log().Logd(fmt.Sprintf("Using config: %+v", config))
+	s.latestVersionCheckEnabled = defaultConfig.AppVersion == config.AppVersion && defaultConfig.AppVersionCode == config.AppVersionCode
 	headers := ApplyConfiguredHeaders(http.Header{
 		"User-Agent":             {buildUserAgent(s.config.AppVersion, s.device)},
 		"deviceId":               {s.generateDeviceId()},
@@ -567,6 +643,7 @@ func newRuStoreSource() (Source, error) {
 		"Content-Type":           {"application/json; charset=utf-8"},
 	}, config.Headers)
 	s.Net = network.DefaultClientForSource(s.Name()).WithDefaultHeaders(headers)
+
 	return s, nil
 }
 
