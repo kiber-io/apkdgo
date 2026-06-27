@@ -26,15 +26,10 @@ jobs:
         arch: [amd64, arm64]
 
     steps:
-    # - name: Show GitHub context
-    #   env:
-    #     GITHUB_CONTEXT: ${{ toJson(github) }}
-    #   run: echo "$GITHUB_CONTEXT"
-
     - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
       with:
         persist-credentials: false
-    
+
     - name: Set up Go
       uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5.6.0
       with:
@@ -53,7 +48,7 @@ jobs:
         os="${{ matrix.os }}"
         arch="${{ matrix.arch }}"
         OUTPUT_DIR="dist"
-        
+
         mkdir -p "$OUTPUT_DIR"
         EXT=""
         if [ "${{ matrix.os }}" = "windows" ]; then EXT=".exe"; fi
