@@ -197,7 +197,16 @@ func loadConfig(path string) (*AppConfig, error) {
 	if err := ensureSingleYAMLDocument(configBytes); err != nil {
 		return nil, err
 	}
-	if err := decodeYAMLBytesStrict(configBytes, cfg); err != nil {
+	version, err := detectConfigVersion(configBytes)
+	if err != nil {
+		return nil, err
+	}
+	parser, err := getConfigParser(version)
+	if err != nil {
+		return nil, err
+	}
+	cfg, err = parser.Parse(configBytes)
+	if err != nil {
 		return nil, err
 	}
 	if err := normalizeConfig(cfg, configDir); err != nil {

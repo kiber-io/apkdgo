@@ -394,6 +394,43 @@ sources:
 	}
 }
 
+func TestApplyConfigVersion1SourceConfigCompatibility(t *testing.T) {
+	state := snapshotMainState()
+	t.Cleanup(func() {
+		restoreMainState(state)
+	})
+	configFile = writeTestConfig(t, `
+version: 1
+sources:
+  rustore:
+    profile:
+      app_version: "1.95.0.1"
+      app_version_code: "1095001"
+      firmware_lang: en
+    headers:
+      user-agent: custom-agent
+`)
+
+	resolvedCfg, _, err := applyConfig(newConfigApplyCommand(t))
+	if err != nil {
+		t.Fatalf("unexpected apply config error: %v", err)
+	}
+	configAny, ok := resolvedCfg.sourceConfigs["rustore"]
+	if !ok {
+		t.Fatalf("expected rustore source config to be decoded")
+	}
+	config, ok := configAny.(sources.RuStoreConfig)
+	if !ok {
+		t.Fatalf("expected rustore config type, got %T", configAny)
+	}
+	if config.Headers["User-Agent"] != "custom-agent" {
+		t.Fatalf("expected version 1 User-Agent header to be preserved, got %+v", config.Headers)
+	}
+	if config.AppVersion != "1.95.0.1" || config.AppVersionCode != "1095001" || config.FirmwareLang != "en" {
+		t.Fatalf("unexpected rustore config values from version 1 config: %+v", config)
+	}
+}
+
 func TestApplyConfigRejectsUnknownProfileField(t *testing.T) {
 	state := snapshotMainState()
 	t.Cleanup(func() {
@@ -420,10 +457,11 @@ func TestApplyConfigRejectsInvalidProfileValue(t *testing.T) {
 		restoreMainState(state)
 	})
 	configFile = writeTestConfig(t, `
-version: 2
+version: 1
 sources:
   rustore:
-    app_version_code: "abc"
+    profile:
+      app_version_code: "abc"
 `)
 
 	if _, _, err := applyConfig(newConfigApplyCommand(t)); err == nil {
