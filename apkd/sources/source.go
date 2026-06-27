@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"maps"
 	"net/http"
 	"regexp"
 	"strings"
@@ -168,9 +169,7 @@ func Register(s Source) error {
 
 func GetAll() map[string]Source {
 	registry := make(map[string]Source, len(sources))
-	for sourceName, source := range sources {
-		registry[sourceName] = source
-	}
+	maps.Copy(registry, sources)
 	return registry
 }
 
