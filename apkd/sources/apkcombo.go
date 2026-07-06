@@ -169,10 +169,16 @@ func (s *ApkCombo) parseVersionItem(e *goquery.Selection) (apkComboVersionItem, 
 	if !exists {
 		return apkComboVersionItem{}, errors.New("download link not found")
 	}
+	base, err := neturl.Parse(s.config.BaseURL)
+	linkUrl, err := neturl.Parse(link)
+	if err != nil {
+		return apkComboVersionItem{}, fmt.Errorf("failed to parse link URL: %w", err)
+	}
+	linkRef := base.ResolveReference(linkUrl)
 
 	return apkComboVersionItem{
 		VersionName: versionName,
-		Link:        link,
+		Link:        linkRef.String(),
 		Type:        fileType,
 		VersionCode: versionCode,
 	}, nil
