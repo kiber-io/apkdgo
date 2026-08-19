@@ -3,7 +3,10 @@ package sources
 import (
 	"archive/zip"
 	"bytes"
+	"crypto/hmac"
 	crand "crypto/rand"
+	"crypto/sha256"
+	"encoding/base64"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -28,6 +31,8 @@ type RuStore struct {
 	device                    devices.Device
 	config                    RuStoreConfig
 	latestVersionOnce         sync.Once
+	signatureOnce             sync.Once
+	signature                 string
 	latestVersionCheckEnabled bool
 }
 
@@ -49,6 +54,11 @@ type RuStoreConfig struct {
 
 var ruStoreVerCodeRegexp = regexp.MustCompile(`^\d+$`)
 var firmwareLangRegexp = regexp.MustCompile(`^[a-z]{2,8}$`)
+
+var (
+	rustoreHMACKey, _ = base64.StdEncoding.DecodeString("K+eeiCbnVFnZ71KEVal0g5siHaX6v6drh8upeLgEPoU=")
+	rustoreAPKCert, _ = base64.StdEncoding.DecodeString("Zh8ggo73gN4LebxZ8mowhkMWNV8w5Pkc+hSiB5GDmRQ=")
+)
 
 func (s *RuStore) Name() string {
 	return "rustore"
@@ -91,6 +101,71 @@ func (s *RuStore) ensureLatestVersion() {
 			s.Log().Logw(fmt.Sprintf("Failed to update default headers with latest RuStore version: %v", err))
 		}
 	})
+}
+
+func (s *RuStore) getSignature() string {
+	s.signatureOnce.Do(func() {
+		s.signature = s.fetchSignature()
+	})
+	return s.signature
+}
+
+func (s *RuStore) fetchSignature() (signature string) {
+	url := "https://api.rustore.ru/v1/secure/nonce"
+
+	req, err := s.NewRequest("POST", url, nil)
+	if err != nil {
+		return
+	}
+
+	res, err := s.Http().Do(req)
+	if err != nil {
+		return
+	}
+
+	defer res.Body.Close()
+	body, err := readBody(res)
+	if err != nil {
+		return
+	}
+	if res.StatusCode != http.StatusOK {
+		return
+	}
+
+	var response struct {
+		Body struct {
+			Nonce string `json:"nonce"`
+		} `json:"body"`
+		Nonce string `json:"nonce"`
+	}
+	if err := json.Unmarshal(body, &response); err != nil {
+		return
+	}
+
+	nonce := response.Body.Nonce
+	if nonce == "" {
+		nonce = response.Nonce
+	}
+	if nonce == "" {
+		return
+	}
+
+	signature, err = s.signNonce(nonce)
+	if err != nil {
+		return
+	}
+	return signature
+}
+
+func (s *RuStore) signNonce(nonceB64 string) (string, error) {
+	nonce, err := base64.StdEncoding.DecodeString(nonceB64)
+	if err != nil {
+		return "", fmt.Errorf("decode RuStore nonce: %w", err)
+	}
+	mac := hmac.New(sha256.New, rustoreHMACKey)
+	mac.Write(nonce)
+	mac.Write(rustoreAPKCert)
+	return base64.StdEncoding.EncodeToString(mac.Sum(nil)), nil
 }
 
 func (s *RuStore) getLatestRustoreVersion() (RuStoreUpdate, error) {
@@ -193,6 +268,7 @@ func (s *RuStore) getAppInfo(packageName string) (map[string]any, error) {
 	if err != nil {
 		return nil, err
 	}
+	req.Header.Set("X-Client-Signature", s.getSignature())
 
 	res, err := s.Http().Do(req)
 	if err != nil {
@@ -259,6 +335,7 @@ func (s *RuStore) getDownloadLink(appId float64) (string, error) {
 	if err != nil {
 		return "", err
 	}
+	req.Header.Set("X-Client-Signature", s.getSignature())
 
 	resp, err := s.Http().Do(req)
 	if err != nil {
@@ -643,6 +720,7 @@ func newRuStoreSource() (Source, error) {
 		"firmwareVer":            {s.device.AndroidVersion},
 		"deviceType":             {"mobile"},
 		"ruStoreVerCode":         {s.config.AppVersionCode},
+		"ruStoreVerName":         {s.config.AppVersion},
 		"Content-Type":           {"application/json; charset=utf-8"},
 	}, config.Headers)
 	s.Net = network.DefaultClientForSource(s.Name()).WithDefaultHeaders(headers)
