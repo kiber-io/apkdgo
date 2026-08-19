@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"crypto/tls"
+	"crypto/x509"
 	"errors"
 	"fmt"
 	"io"
@@ -277,6 +278,39 @@ func isProxyInsecureSkipVerifyEnabled() bool {
 func (c *Client) WithDefaultHeaders(headers http.Header) *Client {
 	c.SetDefaultHeaders(headers)
 	return c
+}
+
+func (c *Client) WithTLSRootCAs(rootCAs *x509.CertPool) *Client {
+	if rootCAs == nil {
+		return c
+	}
+
+	baseClient, ok := c.doer.(*http.Client)
+	if !ok {
+		return c
+	}
+	baseTransport, ok := baseClient.Transport.(*http.Transport)
+	if !ok {
+		return c
+	}
+
+	transport := baseTransport.Clone()
+	tlsConfig := transport.TLSClientConfig
+	if tlsConfig == nil {
+		tlsConfig = &tls.Config{}
+	} else {
+		tlsConfig = tlsConfig.Clone()
+	}
+	tlsConfig.RootCAs = rootCAs
+	transport.TLSClientConfig = tlsConfig
+
+	customHTTPClient := *baseClient
+	customHTTPClient.Transport = transport
+	return &Client{
+		doer:           &customHTTPClient,
+		retry:          cloneRetryPolicy(c.retry),
+		defaultHeaders: c.DefaultHeaders(),
+	}
 }
 
 func (c *Client) SetDefaultHeaders(headers http.Header) *Client {

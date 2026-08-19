@@ -6,6 +6,8 @@ import (
 	"crypto/hmac"
 	crand "crypto/rand"
 	"crypto/sha256"
+	"crypto/x509"
+	"embed"
 	"encoding/base64"
 	"encoding/json"
 	"errors"
@@ -54,6 +56,38 @@ type RuStoreConfig struct {
 
 var ruStoreVerCodeRegexp = regexp.MustCompile(`^\d+$`)
 var firmwareLangRegexp = regexp.MustCompile(`^[a-z]{2,8}$`)
+
+//go:embed rustore_certs/*.pem
+var rustoreEmbeddedCerts embed.FS
+var rustoreCAPoolOnce sync.Once
+var rustoreCAPool *x509.CertPool
+var rustoreCAPoolErr error
+
+func rustoreTrustedCAPool() (*x509.CertPool, error) {
+	rustoreCAPoolOnce.Do(func() {
+		rustoreCAPool, _ = x509.SystemCertPool()
+		if rustoreCAPool == nil {
+			rustoreCAPool = x509.NewCertPool()
+		}
+		entries, err := rustoreEmbeddedCerts.ReadDir("rustore_certs")
+		if err != nil {
+			rustoreCAPoolErr = fmt.Errorf("read embedded RuStore CAs: %w", err)
+			return
+		}
+		for _, entry := range entries {
+			certData, err := rustoreEmbeddedCerts.ReadFile("rustore_certs/" + entry.Name())
+			if err != nil {
+				rustoreCAPoolErr = fmt.Errorf("read embedded RuStore CA %s: %w", entry.Name(), err)
+				return
+			}
+			if ok := rustoreCAPool.AppendCertsFromPEM(certData); !ok {
+				rustoreCAPoolErr = fmt.Errorf("parse embedded RuStore CA %s", entry.Name())
+				return
+			}
+		}
+	})
+	return rustoreCAPool, rustoreCAPoolErr
+}
 
 var (
 	rustoreHMACKey, _ = base64.StdEncoding.DecodeString("K+eeiCbnVFnZ71KEVal0g5siHaX6v6drh8upeLgEPoU=")
@@ -218,7 +252,16 @@ func (s *RuStore) Download(version Version) (*DownloadStream, error) {
 	if err != nil {
 		return nil, err
 	}
-	return createResponseReader(s.Http(), req)
+
+	downloadHTTP := s.Http()
+	trustedCAPool, err := rustoreTrustedCAPool()
+	if err != nil {
+		return nil, fmt.Errorf("failed to load RuStore trusted CAs: %w", err)
+	}
+	if client, ok := downloadHTTP.(*network.Client); ok {
+		downloadHTTP = client.WithTLSRootCAs(trustedCAPool)
+	}
+	return createResponseReader(downloadHTTP, req)
 }
 
 func (s *RuStore) generateDeviceId() string {
